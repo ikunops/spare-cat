@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f4f0e4" />
+  <title>闲猫·手慢无 · Spare Cat · 让附近的猫，被附近的人看见</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&family=Noto+Serif+SC:wght@600;700;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="stage">
+    <aside class="rail" aria-label="闲猫产品说明">
+      <div class="rail-brand">
+        <span class="seal seal-brand">猫</span>
+        <div class="rail-brand-text">
+          <strong>闲猫·手慢无</strong>
+          <span>SPARE CAT · SPARE A HOME</span>
+          <span>SPARE A HOME · SHARE A LIFE</span>
+        </div>
+      </div>
+
+      <p class="rail-kicker">A QUIET PLACE FOR NEARBY CATS</p>
+      <h1 class="rail-title">让附近的猫，<br /><em>被附近的人看见。</em></h1>
+      <p class="rail-copy">一个邻里流浪猫领养与互助网络。上报一次偶遇，读完一份照护手册，或走进街角那家靠谱的医院。不是买卖，是接管一份附近的牵挂。</p>
+
+      <nav class="rail-nav" aria-label="原型页面">
+        <button type="button" data-nav="home" class="is-active"><span>01</span><b>附近发现</b><small>猫的档案与筛选</small></button>
+        <button type="button" data-nav="map"><span>02</span><b>猫口地图</b><small>坐标与邻里好店</small></button>
+        <button type="button" data-nav="publish"><span>03</span><b>上报一只猫</b><small>照片、特征与位置</small></button>
+        <button type="button" data-nav="community"><span>04</span><b>广场</b><small>经验、就医与遛猫</small></button>
+        <button type="button" data-nav="profile"><span>05</span><b>我的猫事</b><small>收藏、申请与信用</small></button>
+        <button type="button" data-nav="services" class="rail-nav-extra"><span>+</span><b>附近好店</b><small>医院、商店、猫咖、遛猫的地方</small></button>
+      </nav>
+
+      <div class="rail-principles">
+        <span class="rail-principles-title">闲猫守则</span>
+        <p><span>一</span>不做活体交易，只撮合领养。</p>
+        <p><span>二</span>公开大致街区，不公开精确坐标。</p>
+        <p><span>三</span>好店评价保留不同体验，也保留解释。</p>
+      </div>
+
+      <footer class="rail-footer">
+        <span>INTERACTIVE PROTOTYPE · 2026.10</span>
+        <span>杭州 · 西湖区</span>
+      </footer>
+    </aside>
+
+    <div class="phone-wrap">
+      <div class="phone" aria-label="闲猫移动端原型">
+        <div class="app" id="app">
+          <div class="app-texture" aria-hidden="true"></div>
+          <main id="view" class="view" aria-live="polite"></main>
+          <nav class="tabbar" id="tabbar" aria-label="主导航">
+            <button type="button" data-nav="home" class="tab is-active" aria-label="附近发现">
+              <svg class="icon" aria-hidden="true"><use href="#i-compass"></use></svg>
+              <span>发现</span>
+            </button>
+            <button type="button" data-nav="map" class="tab" aria-label="猫口地图">
+              <svg class="icon" aria-hidden="true"><use href="#i-map"></use></svg>
+              <span>地图</span>
+            </button>
+            <button type="button" data-nav="publish" class="tab tab-publish" aria-label="上报一只猫">
+              <span class="publish-orb"><svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg></span>
+              <span>上报</span>
+            </button>
+            <button type="button" data-nav="community" class="tab" aria-label="广场">
+              <svg class="icon" aria-hidden="true"><use href="#i-square"></use></svg>
+              <span>广场</span>
+            </button>
+            <button type="button" data-nav="profile" class="tab" aria-label="我的猫事">
+              <svg class="icon" aria-hidden="true"><use href="#i-user"></use></svg>
+              <span>我的</span>
+            </button>
+          </nav>
+          <div id="overlayRoot" class="overlay-root"></div>
+          <div id="toastRoot" class="toast-root" aria-live="polite"></div>
+        </div>
+      </div>
+      <div class="phone-caption">
+        <span>可交互原型</span>
+        <span class="caption-line"></span>
+        <span>所有档案与评价均为虚构</span>
+        <a class="prototype-link" href="web.html">打开 Web 版 →</a>
+      </div>
+    </div>
+  </div>
+
+  <svg id="icon-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="i-compass" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2.1 5-5 2.1 2.1-5 5-2.1Z"/></symbol>
+    <symbol id="i-map" viewBox="0 0 24 24"><path d="M9 18 3 21V6l6-3 6 3 6-3v15l-6 3-6-3Z"/><path d="M9 3v15M15 6v15"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-square" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 8h4M7 12h10M7 16h7"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></symbol>
+    <symbol id="i-heart" viewBox="0 0 24 24"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8l1.1 1.1L12 21l7.8-7.5 1.1-1.1a5.5 5.5 0 0 0-.1-7.8Z"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-arrow-up-right" viewBox="0 0 24 24"><path d="M7 17 17 7M8 7h9v9"/></symbol>
+    <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+    <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 7h3l1.5-2h7L17 7h3v13H4V7Z"/><circle cx="12" cy="13" r="4"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m4 12 5 5L20 6"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1L3.2 9.4l6.1-.9L12 3Z"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 5 3 8 7 10 4-2 7-5 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 11 9-8 9 8v9H3v-9Z"/><path d="M9 20v-6h6v6"/></symbol>
+    <symbol id="i-paw" viewBox="0 0 24 24"><ellipse cx="12" cy="15" rx="5" ry="4"/><circle cx="6" cy="9" r="2"/><circle cx="10" cy="5.5" r="2"/><circle cx="15" cy="5.5" r="2"/><circle cx="19" cy="9" r="2"/></symbol>
+    <symbol id="i-cat" viewBox="0 0 24 24"><path d="M5 10 4 3l5 3h6l5-3-1 7"/><path d="M5 10c-1 2-1 4 0 6 1.3 2.7 3.9 4 7 4s5.7-1.3 7-4c1-2 1-4 0-6-1.3-2.7-3.9-4-7-4s-5.7 1.3-7 4Z"/><path d="M9 12h.01M15 12h.01M10 16c1.2.8 2.8.8 4 0M4 14H1M4 17l-3 1M20 14h3M20 17l3 1"/></symbol>
+    <symbol id="i-trap" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="12" rx="2"/><path d="M7 7V4M17 7V4M7 19v2M17 19v2M8 12h8M8 16h5"/><circle cx="17" cy="15" r="1"/></symbol>
+    <symbol id="i-store" viewBox="0 0 24 24"><path d="M4 10v10h16V10M3 10l2-6h14l2 6"/><path d="M3 10c0 2 4 2 4 0 0 2 5 2 5 0 0 2 5 2 5 0 0 2 4 2 4 0M9 20v-5h6v5"/></symbol>
+    <symbol id="i-hospital" viewBox="0 0 24 24"><path d="M4 21V6l8-3 8 3v15"/><path d="M9 21v-5h6v5M12 7v6M9 10h6"/></symbol>
+    <symbol id="i-coffee" viewBox="0 0 24 24"><path d="M4 8h13v6a6 6 0 0 1-6 6H10a6 6 0 0 1-6-6V8Z"/><path d="M17 10h2a3 3 0 0 1 0 6h-2M7 3v2M11 3v2M15 3v2M4 22h15"/></symbol>
+    <symbol id="i-tree" viewBox="0 0 24 24"><path d="M12 22v-6"/><path d="M12 3 5 13h4l-3 5h12l-3-5h4L12 3Z"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4Z"/><path d="m14 6 4 4"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6 1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></symbol>
+    <symbol id="i-notebook" viewBox="0 0 24 24"><path d="M6 3h13v18H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M8 3v18M11 8h5M11 12h5"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4 20-7Z"/><path d="M22 2 11 13"/></symbol>
+    <symbol id="i-locate" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="8"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 20"/></symbol>
+  </svg>
+
+  <script src="app.js"></script>
+</body>
+</html>
