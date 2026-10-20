@@ -11,13 +11,15 @@
 
 ## 三个入口
 
-<table>
-<tr>
-<td width="33%"><img src="docs/screens/app-home.jpg" alt="发现页"><br><b>发现</b><br>附近的猫，在等一个家</td>
-<td width="33%"><img src="docs/screens/app-map.jpg" alt="猫口地图"><br><b>猫口地图</b><br>猫不在列表里，在街角</td>
-<td width="33%"><img src="docs/screens/app-profile.jpg" alt="我的猫事"><br><b>我的猫事</b><br>你留下的每一笔，都算数</td>
-</tr>
-</table>
+<p align="center">
+  <b>发现</b> · 附近的猫，在等一个家 &nbsp;|&nbsp; <b>猫口地图</b> · 猫不在列表里，在街角 &nbsp;|&nbsp; <b>我的猫事</b> · 你留下的每一笔，都算数
+</p>
+
+<p align="center">
+  <img src="docs/screens/app-home.jpg" width="31%" alt="发现页">
+  <img src="docs/screens/app-map.jpg" width="31%" alt="猫口地图">
+  <img src="docs/screens/app-profile.jpg" width="31%" alt="我的猫事">
+</p>
 
 ## 桌面端
 
