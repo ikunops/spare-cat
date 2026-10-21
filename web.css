@@ -74,10 +74,8 @@
 
 .cat-mosaic { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px 17px; }
 .cat-tile { text-align: left; border: 0; background: transparent; padding: 0; min-width: 0; position: relative; animation: rise .6s var(--ease) both; animation-delay: calc(var(--i, 0) * 55ms); }
-.cat-tile-photo { position: relative; overflow: hidden; background: var(--paper-deep); aspect-ratio: 1 / 1.14; }
-.cat-tile:nth-child(5n + 1) .cat-tile-photo { aspect-ratio: 1 / 1.31; }
-.cat-tile:nth-child(5n + 3) .cat-tile-photo { aspect-ratio: 1 / 1.02; }
-.cat-tile-photo img { width: 100%; height: 100%; object-fit: cover; transition: transform .8s var(--ease), filter .4s ease; }
+.cat-tile-photo { position: relative; overflow: hidden; background: var(--paper-deep); aspect-ratio: 1 / 1; }
+.cat-tile-photo img { width: 100%; height: 100%; object-fit: cover; object-position: center center; transition: transform .8s var(--ease), filter .4s ease; }
 .cat-tile:hover .cat-tile-photo img { transform: scale(1.045); }
 .cat-tile::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--orange); transform: scaleX(0); transform-origin: left; transition: transform .45s var(--ease); }
 .cat-tile:hover::after { transform: scaleX(1); }

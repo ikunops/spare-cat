@@ -87,6 +87,10 @@ docs/screens/                        README 用压缩截图
 - 后端：Node 24（`node:sqlite`），SQLite 单文件数据库
 - 响应式：1180 / 900 / 600 / 420 四档断点
 
+## 数据库
+
+SQLite 单文件，11 张表 / 107 个字段，完整字段说明见 [docs/SCHEMA.md](docs/SCHEMA.md)。
+
 ## 本地运行
 
 ```bash

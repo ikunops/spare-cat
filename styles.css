@@ -183,10 +183,8 @@ p, h1, h2, h3, h4 { margin: 0; }
 .cat-card { display: inline-block; width: 100%; margin-bottom: 11px; break-inside: avoid; text-align: left; background: var(--card); border: 1px solid var(--line); border-radius: 17px; overflow: hidden; padding: 0; transition: transform 0.3s var(--ease), box-shadow 0.3s var(--ease), border-color 0.2s ease; animation: rise 0.55s var(--ease) both; animation-delay: calc(var(--i, 0) * 40ms); }
 .cat-card:hover { transform: translateY(-3px); border-color: var(--line-strong); box-shadow: 0 12px 24px rgba(23, 37, 29, 0.09); }
 .cat-photo { position: relative; overflow: hidden; background: var(--paper-deep); }
-.cat-card:nth-child(3n + 1) .cat-photo { aspect-ratio: 4 / 5; }
-.cat-card:nth-child(3n + 2) .cat-photo { aspect-ratio: 1 / 1.02; }
-.cat-card:nth-child(3n) .cat-photo { aspect-ratio: 1 / 1.15; }
-.cat-photo img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.7s var(--ease); }
+.cat-card .cat-photo { aspect-ratio: 1 / 1; }
+.cat-photo img { width: 100%; height: 100%; object-fit: cover; object-position: center center; transition: transform 0.7s var(--ease); }
 .cat-card:hover .cat-photo img { transform: scale(1.03); }
 .cat-card .status-pill { position: absolute; left: 9px; top: 9px; height: 23px; padding: 0 8px; font-size: 8px; }
 .cat-fav { position: absolute; top: 3px; right: 3px; width: 44px; height: 44px; border: 0; background: transparent; color: #fff9eb; display: grid; place-items: center; }
