@@ -1627,6 +1627,7 @@ function adminListType() {
 function fetchAdminStats() {
   return API.request('/api/admin/stats').then((payload) => {
     state.admin.stats = payload;
+    if (state.page === 'admin') renderApp({ preserveScroll: true });
   }).catch((error) => toast(error.message || '看板加载失败'));
 }
 
