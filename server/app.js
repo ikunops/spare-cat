@@ -9,6 +9,8 @@ const ROOT = path.join(__dirname, '..');
 const PORT = Number(process.env.PORT || 4173);
 const HOST = process.env.HOST || '127.0.0.1';
 const USERNAME_RE = /^[\u4e00-\u9fa5a-zA-Z0-9_\-.·]{2,20}$/;
+// 测试模式：无令牌访问自动发访客身份（免注册），管理权限仍需真实注册账号
+const TEST_MODE = process.env.TEST_MODE === '1';
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8',
@@ -178,9 +180,24 @@ function placeholders(values) {
   return values.map(() => '?').join(',');
 }
 
+function makeGuest(db) {
+  const code = crypto.randomBytes(2).toString('hex').toUpperCase();
+  const token = makeToken();
+  db.prepare(`INSERT INTO users (id, display_name, avatar_text, area, verified, credit, token, is_admin)
+    VALUES (?, ?, '客', '测试访客', 0, 70, ?, 0)`)
+    .run(`guest-${crypto.randomBytes(6).toString('hex')}`, `访客${code}`, token);
+  return db.prepare('SELECT * FROM users WHERE token = ?').get(token);
+}
+
 function api(req, res, url) {
   if (req.method === 'GET' && url.pathname === '/api/bootstrap') {
-    return json(res, 200, bootstrap(db, authUser(req)));
+    const user = authUser(req);
+    if (user) return json(res, 200, bootstrap(db, user));
+    if (TEST_MODE) {
+      const guest = makeGuest(db);
+      return json(res, 200, { token: guest.token, guest: true, ...bootstrap(db, guest) });
+    }
+    return json(res, 200, bootstrap(db, null));
   }
 
   if (req.method === 'POST' && url.pathname === '/api/auth/register') {

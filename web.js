@@ -179,6 +179,7 @@ function toast(text) {
 
 function applyBootstrap(payload) {
   if (!payload) return;
+  if (payload.token && !state.authToken) saveAuth(payload.token);
   state.user = payload.user || null;
   if (Array.isArray(payload.cats)) {
     const baseIds = new Set(CATS.map((cat) => cat.id));
