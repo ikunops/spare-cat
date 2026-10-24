@@ -343,9 +343,9 @@ function authModal(mode = 'login') {
       <form id="webAuthForm" data-mode="${isRegister ? 'register' : 'login'}">
         ${isRegister ? `<div class="form-field"><label for="webAuthNickname">昵称<small>社区里显示的名字，1-12 个字</small></label><input class="input" id="webAuthNickname" name="nickname" placeholder="比如：三栋的阿橘" maxlength="12" /></div>` : ''}
         <div class="form-field"><label for="webAuthUsername">用户名<small>3-20 位字母、数字、_ 或 -</small></label><input class="input" id="webAuthUsername" name="username" placeholder="your-name" autocomplete="username" /></div>
-        <div class="form-field"><label for="webAuthPassword">密码<small>至少 6 位 · 暂无找回渠道，请牢记</small></label><input class="input" id="webAuthPassword" name="password" type="password" placeholder="设置密码" autocomplete="new-password" /></div>
-        <div class="form-field"><label for="webAuthPassword2">再输一遍密码</label><input class="input" id="webAuthPassword2" name="password2" type="password" placeholder="两次输入要一致" autocomplete="new-password" /></div>
-        ${isRegister ? `<div class="info-note">${icon('shield')}注册即表示同意邻里守则：不做交易、位置只到街区、不同体验都会被保留。</div>` : ''}
+        <div class="form-field"><label for="webAuthPassword">密码<small>${isRegister ? '至少 6 位 · 暂无找回渠道，请牢记' : ''}</small></label><div class="input-wrap"><input class="input" id="webAuthPassword" name="password" type="password" placeholder="${isRegister ? '设置密码' : '你的密码'}" autocomplete="${isRegister ? 'new-password' : 'current-password'}" /><button type="button" class="pw-eye" data-pw-eye="webAuthPassword" aria-label="显示或隐藏密码"><svg class="icon" aria-hidden="true"><use href="#i-eye"></use></svg></button></div></div>
+        ${isRegister ? `<div class="form-field"><label for="webAuthPassword2">再输一遍密码</label><div class="input-wrap"><input class="input" id="webAuthPassword2" name="password2" type="password" placeholder="两次输入要一致" autocomplete="new-password" /><button type="button" class="pw-eye" data-pw-eye="webAuthPassword2" aria-label="显示或隐藏密码"><svg class="icon" aria-hidden="true"><use href="#i-eye"></use></svg></button></div></div>
+        <div class="info-note">${icon('shield')}注册即表示同意邻里守则：不做交易、位置只到街区、不同体验都会被保留。</div>` : ''}
         <div class="form-error" role="alert"></div>
         <div class="modal-actions"><button class="btn" type="button" data-close-modal>先逛逛</button><button class="btn btn-primary" type="submit">${isRegister ? '创建身份' : '登录'}</button></div>
       </form>
@@ -2714,6 +2714,20 @@ document.addEventListener('click', (event) => {
 
   const chip = event.target.closest('[data-picker-spot]');
   if (chip) { event.preventDefault(); pickSpotById(chip.dataset.pickerSpot); return; }
+
+  const pwEyeBtn = event.target.closest('[data-pw-eye]');
+  if (pwEyeBtn) {
+    event.preventDefault();
+    const input = document.getElementById(pwEyeBtn.dataset.pwEye);
+    if (input) {
+      const show = input.type === 'password';
+      input.type = show ? 'text' : 'password';
+      const use = pwEyeBtn.querySelector('use');
+      if (use) use.setAttribute('href', show ? '#i-eye-off' : '#i-eye');
+      pwEyeBtn.setAttribute('aria-label', show ? '隐藏密码' : '显示或隐藏密码');
+    }
+    return;
+  }
 
   const adminTabBtn = event.target.closest('[data-admin-tab]');
   if (adminTabBtn) { event.preventDefault(); state.adminTab = adminTabBtn.dataset.adminTab; renderApp({ preserveScroll: true }); return; }

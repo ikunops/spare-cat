@@ -655,3 +655,17 @@ body.full-map-open .web-tabbar { display: none !important; }
   .admin-row { flex-direction: column; align-items: flex-start; }
   .admin-row-actions { width: 100%; justify-content: flex-start; }
 }
+
+/* ---- auth modal readability + password eye ---- */
+.auth-modal { font-size: 13px; }
+.auth-modal .form-field { margin-top: 16px; }
+.auth-modal .form-field label { font-family: var(--sans); font-size: 12px; color: var(--ink); margin-bottom: 7px; }
+.auth-modal .form-field label small { font-size: 10px; color: var(--muted); margin-left: 6px; font-weight: 400; }
+.auth-modal .input, .auth-modal .textarea { font-size: 14px; }
+.auth-modal .form-error { font-size: 12px; }
+.auth-modal .info-note { font-size: 11px; }
+.input-wrap { position: relative; }
+.input-wrap .input { padding-right: 42px; }
+.pw-eye { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); border: 0; background: transparent; color: var(--muted); cursor: pointer; padding: 7px; display: grid; place-items: center; border-radius: 50%; }
+.pw-eye:hover { color: var(--ink); background: rgba(23,37,29,.06); }
+.pw-eye .icon { width: 16px; height: 16px; }
