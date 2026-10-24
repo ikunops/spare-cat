@@ -30,6 +30,10 @@ function migrate(db) {
       area TEXT NOT NULL DEFAULT '',
       verified INTEGER NOT NULL DEFAULT 0,
       credit INTEGER NOT NULL DEFAULT 0 CHECK (credit BETWEEN 0 AND 100),
+      username TEXT UNIQUE,
+      password_hash TEXT,
+      salt TEXT,
+      token TEXT UNIQUE,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -174,6 +178,12 @@ function migrate(db) {
       PRIMARY KEY (user_id, post_id)
     );
   `);
+
+  const userColumns = db.prepare('PRAGMA table_info(users)').all().map((column) => column.name);
+  const authColumns = { username: 'TEXT UNIQUE', password_hash: 'TEXT', salt: 'TEXT', token: 'TEXT UNIQUE' };
+  for (const [name, ddl] of Object.entries(authColumns)) {
+    if (!userColumns.includes(name)) db.exec(`ALTER TABLE users ADD COLUMN ${name} ${ddl}`);
+  }
 }
 
 function seed(db) {
@@ -226,11 +236,11 @@ function seed(db) {
   insertPlace.run('s3', '窗台猫咖', '猫咖', 4.4, 89, JSON.stringify(['工作日人少', '有领养墙', '猫状态好']), '11:00 - 22:00', '0571-8888 7022', '入场 ¥48 含饮品', '店里有领养信息墙，和附近群护队有合作。', locDanhuang, '[]', '{}', null);
   insertPlace.run('s4', '沿河绿道', '遛猫的地方', 4.9, 203, JSON.stringify(['牵绳可走', '适合推车', '草坪可休息']), '全天开放 · 建议傍晚', '', '免费', '适合已经习惯牵引绳的猫，第一次出门建议先用推车熟悉环境。', locTuanzi, JSON.stringify(['cat-05.jpg', 'cat-15.jpg']), JSON.stringify({ environment: '沿河步道平整，有树荫和长椅，傍晚风比较凉。草坪中央周末人多。', advice: '适合已经习惯牵引绳的猫。第一次出门建议先用推车走一圈。傍晚六点后遛狗的人多，尽量错峰。', experience: '第一次带板栗来是推车走完整段，第二次才在长椅旁短时间下地。它更愿意贴着树荫走，不太喜欢草坪中央。' }), 'u-linxiaoman');
 
-  const insertReview = db.prepare('INSERT INTO place_reviews (place_id, user_id, author_name, stars, text, tags_json) VALUES (?, ?, ?, ?, ?, ?)');
-  insertReview.run('s1', 'u-linxiaoman', '林小满', 5, '带板栗来做基础检查，医生很耐心，没有乱推项目。', JSON.stringify(['不推销', '对猫温柔']));
-  insertReview.run('s2', 'u-zhouzhou', '周周', 5, '第一次养猫不知道买什么，老板给的都是小包装，没有硬推贵的。', JSON.stringify(['不硬推', '适合新手']));
-  insertReview.run('s3', 'u-ajie', '阿桔', 4, '工作日三点去的，猫比人多。店员不会把睡着的猫抱起来营业。', JSON.stringify(['不强行营业', '环境安静']));
-  insertReview.run('s4', 'u-chen', '车库老陈', 5, '摩卡第一次出门就是来这，先推车走了一圈，第二次才敢下地牵绳。', JSON.stringify(['适合推车', '傍晚凉快']));
+  const insertReview = db.prepare('INSERT INTO place_reviews (place_id, user_id, author_name, stars, text, tags_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
+  insertReview.run('s1', 'u-linxiaoman', '林小满', 5, '带板栗来做基础检查，医生很耐心，没有乱推项目。', JSON.stringify(['不推销', '对猫温柔']), '2026-10-12 10:20:00');
+  insertReview.run('s2', 'u-zhouzhou', '周周', 5, '第一次养猫不知道买什么，老板给的都是小包装，没有硬推贵的。', JSON.stringify(['不硬推', '适合新手']), '2026-10-13 18:40:00');
+  insertReview.run('s3', 'u-ajie', '阿桔', 4, '工作日三点去的，猫比人多。店员不会把睡着的猫抱起来营业。', JSON.stringify(['不强行营业', '环境安静']), '2026-10-14 15:05:00');
+  insertReview.run('s4', 'u-chen', '车库老陈', 5, '摩卡第一次出门就是来这，先推车走了一圈，第二次才敢下地牵绳。', JSON.stringify(['适合推车', '傍晚凉快']), '2026-10-15 17:30:00');
 
   const insertPost = db.prepare('INSERT INTO posts (id, author_id, author_name, avatar_text, tag, title, body, place, image, tag_class, likes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
   insertPost.run('p1', 'u-linxiaoman', '林小满', '林', '捉猫实录', '用航空箱 + 罐头，把南门那只橘白骗进去了', '<p>板栗在南门花坛蹲了三天。前两天我带着罐头去，它吃完就走，根本不给靠近的机会。第三天我换了个思路：不追，先把路线想清楚。</p><h2>真正有用的，是“退路”</h2><p>航空箱放在花坛靠墙的一侧，开口朝向墙。罐头放在箱子里最深处。人退到五米以外，蹲下来，不看它。它绕了两圈，确认没有危险，才进去。</p><blockquote>捉猫不是比谁手快，是比谁更能等。你越急，它越能感觉到。</blockquote>', '翠苑二区', 'cat-01.jpg', 'is-trap', 128, '2026-10-19 08:20:00');
@@ -257,8 +267,9 @@ function seed(db) {
   db.prepare('INSERT INTO applications (cat_id, applicant_id, home_type, experience, reason, status) VALUES (?, ?, ?, ?, ?, ?)').run('xiaohui', 'u-linxiaoman', '整租 / 自有住房', '养过猫', '家里安静，有养胆小猫的经验。', '已约见面');
 }
 
-function bootstrap(db, userId = 'u-linxiaoman') {
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+function bootstrap(db, userRow = null) {
+  const userId = userRow ? userRow.id : null;
+  const user = userRow;
   const catRows = db.prepare(`
     SELECT c.*, l.label AS location_label, l.area AS location_area, l.address AS location_address, l.lat, l.lng, l.coord_system
     FROM cats c LEFT JOIN locations l ON l.id = c.location_id
@@ -273,7 +284,7 @@ function bootstrap(db, userId = 'u-linxiaoman') {
     lat: row.lat, lng: row.lng, coordSystem: row.coord_system,
     verification: row.verification, adoptionState: row.adoption_state,
     views: row.view_count, applications: row.application_count, distance: row.distance_km,
-    reportedAt: row.reported_at, time: formatTime(row.reported_at), reportedByMe: row.reporter_id === userId
+    reportedAt: row.reported_at, time: formatTime(row.reported_at), reportedByMe: Boolean(userId && row.reporter_id === userId)
   }));
   const favoriteIds = db.prepare('SELECT cat_id FROM favorites WHERE user_id = ?').all(userId).map((row) => row.cat_id);
   const appRows = db.prepare(`
@@ -310,7 +321,7 @@ function bootstrap(db, userId = 'u-linxiaoman') {
   return {
     user: user ? {
       id: user.id, name: user.display_name, avatar: user.avatar_text, area: user.area,
-      verified: Boolean(user.verified), credit: user.credit
+      verified: Boolean(user.verified), credit: user.credit, username: user.username || ''
     } : null,
     cats,
     favorites: favoriteIds,
@@ -343,7 +354,7 @@ function bootstrap(db, userId = 'u-linxiaoman') {
       body: row.body, image: row.image, likes: row.likes, comments: (commentsByPost.get(row.id) || []).length,
       commentsList: commentsByPost.get(row.id) || [], featured: false, authorId: row.author_id
     })),
-    userPosts: postRows.filter((row) => row.author_id === userId).map((row) => row.id),
+    userPosts: postRows.filter((row) => userId && row.author_id === userId).map((row) => row.id),
     likedPosts: likedPostIds
   };
 }

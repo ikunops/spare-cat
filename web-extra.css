@@ -58,8 +58,7 @@
 .profile-like-web .feed-tag { margin-left: 0; }
 .profile-like-web p { margin-top: 4px; font-size: 8px; color: var(--muted); }
 
-.contributor-avatar { display: inline-grid; place-items: center; flex: 0 0 auto; padding: 2px; }
-.contributor-avatar .avatar { width: 29px; height: 29px; }
+.contributor-avatar { display: inline-grid; place-items: center; flex: 0 0 auto; padding: 2px; border-radius: 50%; width: fit-content; height: fit-content; line-height: 0; }
 .contributor-avatar.is-frame-neighbor { border: 1px solid var(--sage-deep); border-radius: 50%; }
 .contributor-avatar.is-frame-guard { border: 1px solid var(--orange); border-radius: 50%; box-shadow: 0 0 0 2px rgba(214,91,53,.12); }
 .contributor-avatar.is-frame-senior { border: 1px solid var(--amber); border-radius: 50%; box-shadow: 0 0 0 2px rgba(230,173,78,.18); }
@@ -582,3 +581,45 @@ body.full-map-open .web-tabbar { display: none !important; }
 .profile-card .credit-box span { color: rgba(242,237,222,.78); }
 
 
+
+/* ---- user auth & account ---- */
+.header-user { height: 38px; border: 1px solid var(--line); background: transparent; border-radius: 999px; padding: 0 13px 0 6px; font-size: 11px; display: inline-flex; align-items: center; gap: 7px; color: var(--ink); cursor: pointer; font-weight: 600; }
+.header-user-avatar { width: 26px; height: 26px; border-radius: 50%; background: var(--moss); color: var(--paper-light); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex: none; }
+.header-user.is-anon { color: var(--ink-soft); font-weight: 500; }
+.header-user.is-anon .header-user-avatar { background: transparent; border: 1px solid var(--line-strong); color: var(--moss); }
+.header-user.is-anon .header-user-avatar .icon { width: 14px; height: 14px; }
+.auth-modal { min-width: min(430px, 86vw); }
+.auth-modal h2 { font-size: 20px; margin: 0 0 10px; }
+.auth-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+/* 认证/账号弹窗不显示右上角 ×：遮罩点击、底部按钮与 Esc 已覆盖关闭，且短弹窗顶部无需为角标腾位 */
+.modal:has(.auth-modal) .modal-close { display: none; }
+.auth-tabs button { flex: 1; height: 36px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--ink-soft); cursor: pointer; font-size: 12px; font-weight: 600; }
+.auth-tabs button.is-active { background: var(--moss); color: var(--paper-light); border-color: var(--moss); }
+.account-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.account-head b { font-size: 15px; }
+.account-head small { display: block; color: var(--ink-soft); font-size: 11px; margin-top: 3px; }
+.auth-inline-link { border: 0; background: transparent; color: var(--moss); font-weight: 600; cursor: pointer; font-size: 12px; padding: 0; }
+@media (max-width: 760px) {
+  .header-user { width: 38px; padding: 0; justify-content: center; gap: 0; }
+  .header-user > span:not(.header-user-avatar) { display: none; }
+}
+
+/* ---- geo location note ---- */
+.geo-note { max-width: 1400px; margin: 0 auto; padding: 18px 40px 0; }
+.geo-note-card { border: 1px solid var(--line-strong); border-left: 4px solid var(--moss); border-radius: 14px; background: var(--paper-light); padding: 16px 20px; display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.geo-note-card b { display: inline-flex; align-items: center; gap: 8px; font-size: 15px; }
+.geo-note-card b .icon { width: 16px; height: 16px; color: var(--moss); }
+.geo-note-card p { flex: 1; min-width: 240px; margin: 0; font-size: 12px; color: var(--ink-soft); line-height: 1.7; }
+@media (max-width: 760px) { .geo-note { padding: 14px 18px 0; } }
+
+/* ---- spot picker (map point picking) ---- */
+.spot-picker { position: relative; height: 190px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--paper-deep); z-index: 0; }
+.spot-picker .leaflet-container { height: 100%; width: 100%; background: var(--paper-deep); }
+.spot-picker-pin { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -100%); z-index: 650; pointer-events: none; }
+.spot-picker-pin i { display: block; width: 22px; height: 22px; background: var(--orange); border: 2px solid #fff; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); box-shadow: 0 3px 8px rgba(6,17,11,.35); }
+.spot-picker-pin i::after { content: ""; position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; background: #fff; border-radius: 50%; }
+.spot-picker-readout { margin: 8px 0 0; font-size: 11px; color: var(--ink-soft); display: flex; align-items: center; gap: 6px; min-height: 16px; }
+.spot-picker-readout::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--orange); flex: 0 0 auto; }
+.spot-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.spot-chip { border: 1px solid var(--line); background: var(--paper-light); border-radius: 999px; padding: 4px 10px; font-size: 9px; color: var(--ink-soft); cursor: pointer; min-height: 26px; display: inline-flex; align-items: center; }
+.spot-chip.is-active { background: var(--moss); color: var(--paper-light); border-color: var(--moss); }

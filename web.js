@@ -4,6 +4,8 @@ const CATS = XianmaoData.cats;
 const POSTS = XianmaoData.posts;
 const SERVICES = XianmaoData.services;
 const STORE = 'xianmao-web-v1';
+const AUTH_STORE = 'xianmao-web-auth';
+const GEO_STORE = 'xianmao-geo';
 const DISTANCE_MIN = 0.5;
 const DISTANCE_DEFAULT = 5;
 const DISTANCE_MAX = 20;
@@ -17,17 +19,24 @@ const API = {
   async request(path, options = {}) {
     const url = BASE_PATH && path.startsWith('/') ? BASE_PATH + path : path;
     const response = await fetch(url, {
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...(state.authToken ? { 'x-user-token': state.authToken } : {}) },
       ...options
     });
     const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || '数据库请求失败');
+    if (!response.ok) {
+      const error = new Error(payload.error || '数据库请求失败');
+      error.status = response.status;
+      throw error;
+    }
     return payload;
   }
 };
 
 const state = {
   page: 'home',
+  user: null,
+  authToken: '',
+  geo: null,
   location: '翠苑 · 西湖区',
   query: '',
   quick: '全部',
@@ -121,7 +130,7 @@ const allCats = () => {
 const availableCats = () => allCats().filter((cat) => cat.adoptionState !== '已领养');
 const isFav = (id) => state.favorites.includes(id);
 const catById = (id) => allCats().find((c) => c.id === id);
-const isMine = (cat) => Boolean(cat && (cat.reportedByMe || cat.reporter === '林小满'));
+const isMine = (cat) => Boolean(cat && cat.reportedByMe);
 
 function load() {
   try {
@@ -136,6 +145,10 @@ function load() {
     if (Array.isArray(saved.places)) state.places = saved.places;
     if (typeof saved.location === 'string') state.location = saved.location;
     if (typeof saved.noticeRead === 'boolean') state.noticeRead = saved.noticeRead;
+    const auth = JSON.parse(localStorage.getItem(AUTH_STORE) || '{}');
+    if (typeof auth.token === 'string') state.authToken = auth.token;
+    const geo = JSON.parse(localStorage.getItem(GEO_STORE) || 'null');
+    if (geo && Number.isFinite(geo.lat) && Number.isFinite(geo.lng)) state.geo = geo;
   } catch (error) { /* keep defaults */ }
 }
 function save() {
@@ -165,6 +178,7 @@ function toast(text) {
 
 function applyBootstrap(payload) {
   if (!payload) return;
+  state.user = payload.user || null;
   if (Array.isArray(payload.cats)) {
     const baseIds = new Set(CATS.map((cat) => cat.id));
     payload.cats.forEach((cat) => {
@@ -210,6 +224,7 @@ function applyBootstrap(payload) {
       }
     });
   }
+  applyGeoDistances();
 }
 
 function apiWrite(path, options) {
@@ -218,9 +233,135 @@ function apiWrite(path, options) {
     applyBootstrap(payload);
     return payload;
   }).catch((error) => {
+    if (error.status === 401) {
+      authModal('login');
+      toast('登录后才能发布内容');
+      return null;
+    }
     console.warn('[xianmao] database unavailable, keeping local state', error);
     return null;
   });
+}
+
+const userName = () => (state.user ? state.user.name : '');
+
+function requireAuth() {
+  if (state.user) return true;
+  authModal('login');
+  toast('登录后才能发布内容');
+  return false;
+}
+
+function refreshBootstrap() {
+  if (!API.enabled) return Promise.resolve();
+  return API.request('/api/bootstrap').then((payload) => {
+    applyBootstrap(payload);
+    renderApp({ preserveScroll: true });
+  }).catch((error) => console.warn('[xianmao] bootstrap refresh failed', error));
+}
+
+function saveAuth(token) {
+  state.authToken = token || '';
+  try {
+    if (token) localStorage.setItem(AUTH_STORE, JSON.stringify({ token }));
+    else localStorage.removeItem(AUTH_STORE);
+  } catch (error) { /* ignore */ }
+}
+
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const toRad = (value) => (value * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function roundedDistance(km) {
+  return km < 10 ? Math.round(km * 10) / 10 : Math.round(km);
+}
+
+function applyGeoDistances() {
+  const apply = (items) => {
+    items.forEach((item) => {
+      if (!item || !Number.isFinite(Number(item.lat)) || !Number.isFinite(Number(item.lng))) return;
+      if (item.baseDistance === undefined) item.baseDistance = Number(item.distance) || 0;
+      item.distance = state.geo
+        ? roundedDistance(haversineKm(state.geo.lat, state.geo.lng, Number(item.lat), Number(item.lng)))
+        : item.baseDistance;
+    });
+  };
+  apply(allCats());
+  apply(allPlaces());
+}
+
+function saveGeo(geo) {
+  state.geo = geo;
+  try {
+    if (geo) localStorage.setItem(GEO_STORE, JSON.stringify(geo));
+    else localStorage.setItem(GEO_STORE, JSON.stringify({ denied: true }));
+  } catch (error) { /* ignore */ }
+  applyGeoDistances();
+}
+
+function requestGeolocation() {
+  if (!navigator.geolocation) { toast('这个浏览器不支持定位，先用演示区吧'); return; }
+  navigator.geolocation.getCurrentPosition((position) => {
+    saveGeo({ lat: Number(position.coords.latitude.toFixed(5)), lng: Number(position.coords.longitude.toFixed(5)) });
+    closeModal();
+    renderApp({ preserveScroll: true });
+    toast('已按你的位置计算距离，只在本机生效');
+  }, () => {
+    saveGeo(null);
+    toast('没有拿到定位授权，先用演示区吧');
+  }, { timeout: 8000, maximumAge: 600000 });
+}
+
+function maybeRequestGeo() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(GEO_STORE) || 'null');
+    if (saved && (saved.denied || Number.isFinite(saved.lat))) return;
+  } catch (error) { /* ask anyway */ }
+  requestGeolocation();
+}
+
+function nearestCatDistance() {
+  const list = availableCats();
+  if (!list.length) return Infinity;
+  return Math.min(...list.map((cat) => Number(cat.distance) || 0));
+}
+
+function authModal(mode = 'login') {
+  const isRegister = mode === 'register';
+  modal(`
+    <div class="auth-modal">
+      <div class="auth-tabs" role="tablist">
+        <button type="button" class="${isRegister ? '' : 'is-active'}" data-auth-tab="login">登录</button>
+        <button type="button" class="${isRegister ? 'is-active' : ''}" data-auth-tab="register">注册</button>
+      </div>
+      <form id="webAuthForm" data-mode="${isRegister ? 'register' : 'login'}">
+        ${isRegister ? `<div class="form-field"><label for="webAuthNickname">昵称<small>社区里显示的名字，1-12 个字</small></label><input class="input" id="webAuthNickname" name="nickname" placeholder="比如：三栋的阿橘" maxlength="12" /></div>` : ''}
+        <div class="form-field"><label for="webAuthUsername">用户名<small>3-20 位字母、数字、_ 或 -</small></label><input class="input" id="webAuthUsername" name="username" placeholder="your-name" autocomplete="username" /></div>
+        <div class="form-field"><label for="webAuthPassword">密码<small>至少 6 位 · 暂无找回渠道，请牢记</small></label><input class="input" id="webAuthPassword" name="password" type="password" placeholder="设置密码" autocomplete="new-password" /></div>
+        <div class="form-field"><label for="webAuthPassword2">再输一遍密码</label><input class="input" id="webAuthPassword2" name="password2" type="password" placeholder="两次输入要一致" autocomplete="new-password" /></div>
+        ${isRegister ? `<div class="info-note">${icon('shield')}注册即表示同意邻里守则：不做交易、位置只到街区、不同体验都会被保留。</div>` : ''}
+        <div class="form-error" role="alert"></div>
+        <div class="modal-actions"><button class="btn" type="button" data-close-modal>先逛逛</button><button class="btn btn-primary" type="submit">${isRegister ? '创建身份' : '登录'}</button></div>
+      </form>
+    </div>`);
+}
+
+function accountModal() {
+  if (!state.user) { authModal('login'); return; }
+  modal(`
+    <div class="auth-modal">
+      <div class="account-head">${contributorAvatar(state.user.name, state.user.avatar)}<div><b>${esc(state.user.name)}</b><small>@${esc(state.user.username || state.user.id)} · 邻里信用 ${Number(state.user.credit || 0)}</small></div></div>
+      <form id="webProfileForm">
+        <div class="form-field"><label for="webProfileNickname">昵称<small>1-12 个字</small></label><input class="input" id="webProfileNickname" name="nickname" value="${esc(state.user.name)}" maxlength="12" /></div>
+        <div class="form-field"><label for="webProfileArea">常在哪儿<small>选填，让邻里知道你在哪一带</small></label><input class="input" id="webProfileArea" name="area" value="${esc(state.user.area || '')}" placeholder="比如：翠苑二区" maxlength="20" /></div>
+        <div class="form-error" role="alert"></div>
+        <div class="modal-actions"><button class="btn" type="button" data-logout>退出登录</button><button class="btn btn-primary" type="submit">保存资料</button></div>
+      </form>
+    </div>`);
 }
 
 /* 01-header.js */
@@ -244,7 +385,8 @@ function renderHeader() {
         ${NAV.map((item) => `<button type="button" class="${activePage === item.id ? 'is-active' : ''}" data-page="${item.id}" ${activePage === item.id ? 'aria-current="page"' : ''}>${item.label}</button>`).join('')}
       </nav>
       <div class="header-tools">
-        <button class="location-select" type="button" data-action="location">${icon('pin')}${esc(state.location)}${icon('chevron-down')}</button>
+        <button class="header-user ${state.user ? '' : 'is-anon'}" type="button" data-action="account" aria-label="${state.user ? '账号与资料' : '登录或注册'}"><span class="header-user-avatar">${state.user ? esc(state.user.avatar) : icon('user')}</span><span>${state.user ? esc(state.user.name) : '登录'}</span></button>
+        <button class="location-select" type="button" data-action="location">${icon('pin')}${state.geo ? '我的位置' : esc(state.location)}${icon('chevron-down')}</button>
         <button class="header-store ${activePage === 'services' ? 'is-active' : ''}" type="button" data-page="services" aria-label="查看附近好店" ${activePage === 'services' ? 'aria-current="page"' : ''}>${icon('store')}<span>好店</span></button>
         <button class="header-icon" type="button" data-action="notice" aria-label="查看邻里提醒">${icon('bell')}${state.noticeRead ? '' : '<span class="dot"></span>'}</button>
         <button class="header-cta" type="button" data-page="publish">${icon('plus')}<span>上报一只猫</span></button>
@@ -290,11 +432,11 @@ function allReviews() {
 
 function memberContribution(name) {
   if (!name) return { verified: false, reports: 0, adoptions: 0, posts: 0, comments: 0, reviews: 0, places: 0, total: 0, level: '邻里', frame: '' };
-  const verified = ['林小满', '阿桔', '周周', '车库老陈', '长河阿七'].includes(name);
-  const reports = allCats().filter((cat) => (name === '林小满' ? isMine(cat) : cat.reporter === name)).length;
+  const verified = name === userName() ? Boolean(state.user && state.user.verified) : ['林小满', '阿桔', '周周', '车库老陈', '长河阿七'].includes(name);
+  const reports = allCats().filter((cat) => (name === userName() ? isMine(cat) : cat.reporter === name)).length;
   const adoptions = state.adoptions.filter((adoption) => {
     const cat = catById(adoption.catId);
-    return cat && (cat.reporter === name || (name === '林小满' && adoption.catId === 'banli'));
+    return cat && cat.reporter === name;
   }).length;
   const posts = allPosts().filter((post) => post.author === name).length;
   const comments = allPosts().reduce((total, post) => total + (post.commentsList || []).filter((comment) => comment.name === name).length, 0);
@@ -314,14 +456,21 @@ function contributorBadge(name, compact = false) {
   return `<span class="contributor-badge ${c.frame}"><b>${esc(c.level)}</b>${detail ? `<small>${esc(detail)}</small>` : ''}</span>`;
 }
 
+function avatarTone(name) {
+  let hash = 0;
+  const text = String(name || '');
+  for (let i = 0; i < text.length; i += 1) hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
+  return ['', 'is-orange', 'is-dark'][hash % 3];
+}
+
 function contributorAvatar(name, avatar, tone = '') {
   const c = memberContribution(name);
   const label = String(avatar || name || '邻').slice(0, 1);
-  return `<span class="contributor-avatar ${c.frame}"><span class="avatar ${tone}">${esc(label)}</span></span>`;
+  return `<span class="contributor-avatar ${c.frame}"><span class="avatar ${tone || avatarTone(name)}">${esc(label)}</span></span>`;
 }
 
 function isMyComment(comment) {
-  return comment.name === '林小满';
+  return comment.name === userName();
 }
 
 function myComments() {
@@ -333,7 +482,7 @@ function myLikedPosts() {
 }
 
 function myPosts() {
-  return allPosts().filter((post) => post.author === '林小满');
+  return allPosts().filter((post) => post.author === userName());
 }
 
 function postCommentCount(post) {
@@ -469,25 +618,16 @@ function renderHome() {
     if (k === 'citywide') return v === true;
     return v !== '全部';
   }) || state.quick !== '全部';
+  const geoFar = Boolean(state.geo) && availableCats().length > 0 && nearestCatDistance() > DISTANCE_MAX;
   return `
-    <section class="hero">
-      <div class="hero-left">
-        <div class="hero-kicker">SPARE CAT · 杭州 · 邻里猫口志</div>
-        <h1>附近的猫，<br />在等一个<em>家</em>。</h1>
-        <p class="hero-sub">给附近那只还没被看见的猫，留一个空房间、一段时间。按品种、年龄、性别和距离找到它，读完照护笔记，再决定要不要去见一面。</p>
-        <div class="hero-actions">
-          <button class="btn btn-primary" type="button" data-action="scroll-to-cats">认识附近的猫 ${icon('arrow-right')}</button>
-          <button class="btn" type="button" data-page="publish">${icon('plus')}上报一只猫</button>
-        </div>
-        <div class="hero-proof">
-          <div><b>${availableCats().length}</b><span>只等家的猫</span></div><span class="proof-sep"></span>
-          <div><b>476</b><span>条邻里经验</span></div><span class="proof-sep"></span>
-          <div><b>0</b><span>元领养费用</span></div>
-          <p class="proof-note">信息经基础核验；领养不收取任何费用。</p>
-        </div>
+    ${geoFar ? `
+    <section class="geo-note">
+      <div class="geo-note-card">
+        <b>${icon('locate')}你附近暂时没有猫口上报</b>
+        <p>按你的位置计算，最近的猫在约 ${nearestCatDistance()} km 外。当前展示的是杭州西湖区的演示数据，切回去就能继续逛。</p>
+        <button class="btn" type="button" data-action="use-geo">${icon('pin')}切回杭州演示区</button>
       </div>
-      <div class="hero-right">${heroFeature()}</div>
-    </section>
+    </section>` : ''}
     <section class="discover">
       <div class="discover-main">
         <div class="section-head"><h2>附近也在等<small>NEARBY, RIGHT NOW</small></h2><span class="result-meta">${list.length} / ${availableCats().length} 只匹配</span></div>
@@ -508,18 +648,6 @@ function renderHome() {
         <div class="rail-section"><div class="rail-section-head"><h3>邻里刚写的</h3><button type="button" data-page="community">去广场 ${icon('arrow-up-right')}</button></div>${railPosts()}</div>
         <div class="rail-section"><div class="rail-section-head"><h3>去过的人说</h3><button type="button" data-page="services">全部好店 ${icon('arrow-up-right')}</button></div>${railServices()}</div>
       </aside>
-    </section>
-    <section class="values-strip">
-      <div class="values-intro">
-        <h2>不是每只猫<br />都需要被领养。</h2>
-        <p>有些只需要一口水、一次绝育，或一个不被驱赶的角落。闲猫把“找家”和“留在附近”放在同等重要的位置。</p>
-        <div class="values-stamp"><i></i>SPARE A HOME · SHARE A LIFE</div>
-      </div>
-      <div class="values-list">
-        <div class="value-item"><span>01 / NO TRADE</span><h3>不做活体交易</h3><p>平台只撮合领养，不提供买卖、配种与活体快递。发现交易可直接举报。</p></div>
-        <div class="value-item"><span>02 / SAFE DISTANCE</span><h3>只公开到街区</h3><p>精确位置与联系方式，只在双方确认领养意向后交换，减少围堵和恶意领养。</p></div>
-        <div class="value-item"><span>03 / HONEST REVIEW</span><h3>不同体验都会被保留</h3><p>好店评价记录亲历事实，商家可以公开回应。收录不收费，排序不售卖。</p></div>
-      </div>
     </section>`;
 }
 
@@ -1341,7 +1469,7 @@ function renderPublish() {
           <div class="form-card">
             <div class="form-card-head"><span class="num">03</span><h2>在哪里遇见</h2><small>只公开到街区</small></div>
             <div class="form-field"><label for="webPubArea">大致位置</label><input class="input" id="webPubArea" name="area" placeholder="比如：翠苑二区南门花坛" value="${esc(p.area)}" /></div>
-            <div class="form-field"><label for="webPubSpot">地图上的落点</label><div class="select-wrap"><select class="select" id="webPubSpot" name="spot">${MAP_SPOTS.map((spot) => `<option value="${spot.id}" ${p.spot === spot.id ? 'selected' : ''}>${esc(spot.label)}</option>`).join('')}</select></div><p class="field-help">${icon('pin')}只精确到小区或路口，不会公开具体门牌。</p></div>
+            <div class="form-field"><label>地图上的落点<small>拖动地图，把中央图钉对准位置；或选常用落点</small></label><div id="webPubPickerHost" class="spot-picker"></div><p class="spot-picker-readout" id="webPubPickerHostReadout"></p><div class="spot-chips">${MAP_SPOTS.map((spot) => `<button type="button" class="spot-chip" data-picker-spot="${spot.id}">${esc(spot.label)}</button>`).join('')}</div><p class="field-help">${icon('pin')}只精确到小区或路口，不会公开具体门牌。</p></div>
             <div class="toggle-row"><button class="toggle ${p.sterilized ? 'is-on' : ''}" type="button" data-action="toggle-pub" data-key="sterilized" aria-label="切换绝育状态"></button><p>看起来已绝育（有耳标或剪耳）</p></div>
             <div class="toggle-row"><button class="toggle ${p.friendly ? 'is-on' : ''}" type="button" data-action="toggle-pub" data-key="friendly" aria-label="切换亲人状态"></button><p>比较亲人，可以靠近</p></div>
           </div>
@@ -1468,7 +1596,7 @@ function renderServiceDetail() {
         ${s.details ? `<div class="service-extra-details"><div><span>环境描述</span><p>${esc(s.details.environment || '暂未补充')}</p></div><div><span>适合与提醒</span><p>${esc(s.details.advice || '暂未补充')}</p></div>${s.details.experience ? `<div><span>遛猫心得</span><p>${esc(s.details.experience)}</p></div>` : ''}</div>` : ''}
         ${s.type === '遛猫的地方' ? `<button class="companion-invite" type="button" data-action="compose-companion" data-place="${esc(s.name)}">${icon('paw')}在这个地点找猫友同路<span>先公开见面，不交换住址和电话</span></button>` : ''}
         <div class="review-block">
-          <div class="review-block-head"><h2>邻里怎么说 <span>${s.count} REVIEWS</span></h2><div class="review-block-actions">${s.type === '遛猫的地方' && s.submittedBy === '林小满' ? `<button type="button" data-action="edit-walk-place" data-id="${s.id}">${icon('edit')}补充地点</button>` : ''}<button type="button" data-action="write-review" data-id="${s.id}">${icon('edit')}写评价</button></div></div>
+          <div class="review-block-head"><h2>邻里怎么说 <span>${s.count} REVIEWS</span></h2><div class="review-block-actions">${s.type === '遛猫的地方' && s.submittedBy === userName() ? `<button type="button" data-action="edit-walk-place" data-id="${s.id}">${icon('edit')}补充地点</button>` : ''}<button type="button" data-action="write-review" data-id="${s.id}">${icon('edit')}写评价</button></div></div>
           ${s.reviews.map((r) => `<div class="review-web"><div class="review-web-head">${contributorAvatar(r.name, r.avatar, r.tone)}<div><b>${esc(r.name)}</b><span>${esc(r.time)}</span><small class="contributor-line">${contributorBadge(r.name, true)}</small></div><span class="review-web-stars">${stars(r.stars)}</span></div><p>${esc(r.text)}</p><div class="review-web-tags">${r.tags.map((t) => `<span>${esc(t)}</span>`).join('')}</div></div>`).join('')}
         </div>
       </div>
@@ -1490,7 +1618,7 @@ function renderProfile() {
   const comments = myComments();
   const liked = myLikedPosts();
   const walkPlaces = placeSubmissions();
-  const contribution = memberContribution('林小满');
+  const contribution = memberContribution(userName());
   const tabs = [
     { id: 'adopted', label: '已领养', count: adopted.length },
     { id: 'published', label: '我的上报', count: mine.length },
@@ -1516,12 +1644,21 @@ function renderProfile() {
     <div class="profile-page">
       <aside class="profile-side">
         <div class="profile-card">
-          <div class="profile-card-top"><span>MEMBER SINCE 2024<br />XM-0217</span></div>
-          <div class="profile-avatar">林</div>
-          <h1>林小满</h1>
-          <div class="profile-badge-row">${contributorBadge('林小满', true)}</div>
-          <p>翠苑二区 · ${contribution.verified ? '已实名' : '未实名'} · 愿意先见面</p>
-          <div class="credit-box"><div class="credit-top">${icon('shield')}<b>92</b><span>邻里信用</span></div><div class="credit-track"><i></i></div><span class="credit-note">信息准确、按时回访、无纠纷</span></div>
+          <div class="profile-card-top"><span>SPARE CAT MEMBER</span></div>
+          ${state.user ? `
+          <div class="profile-avatar">${esc(state.user.avatar)}</div>
+          <h1>${esc(state.user.name)}</h1>
+          <div class="profile-badge-row">${contributorBadge(state.user.name, true)}</div>
+          <p>${esc(state.user.area || '附近邻里')} · ${contribution.verified ? '已实名' : '未实名'} · 愿意先见面</p>
+          <div class="credit-box"><div class="credit-top">${icon('shield')}<b>${Number(state.user.credit || 0)}</b><span>邻里信用</span></div><div class="credit-track"><i></i></div><span class="credit-note">信息准确、按时回访、无纠纷</span></div>
+          <button class="btn btn-small" type="button" data-action="account" style="margin-top:12px">${icon('settings')}修改资料 / 退出登录</button>
+          ` : `
+          <div class="profile-avatar">${icon('user')}</div>
+          <h1>还没登录</h1>
+          <div class="profile-badge-row">${contributorBadge('', true)}</div>
+          <p>登录后这里会显示你的上报、申请、发帖和收藏，内容会跟着账号走。</p>
+          <button class="btn btn-primary" type="button" data-action="account" style="margin-top:12px">${icon('user')}登录 / 注册</button>
+          `}
         </div>
         <div class="profile-menu">
           <button type="button" data-page="services">${icon('store')}附近好店与遛猫地点${icon('chevron')}</button>
@@ -1617,7 +1754,7 @@ function profileAdoptions(list) {
 
 /* 18-profilepublished.js */
 function placeSubmissions() {
-  return allPlaces().filter((place) => place.type === '遛猫的地方' && place.submittedBy === '林小满');
+  return allPlaces().filter((place) => place.type === '遛猫的地方' && place.submittedBy === userName());
 }
 
 function profilePlaces(list) {
@@ -1660,8 +1797,75 @@ function modal(html, cls = '') {
   document.body.style.overflow = 'hidden';
 }
 function closeModal() {
+  closeSpotPicker();
   $('#webOverlay').innerHTML = '';
   document.body.style.overflow = '';
+}
+
+let spotPickerMap = null;
+let spotPickerSyncTimer = null;
+
+function closeSpotPicker() {
+  if (spotPickerMap) {
+    try { spotPickerMap.remove(); } catch (error) { /* already torn down */ }
+    spotPickerMap = null;
+  }
+  if (spotPickerSyncTimer) { clearTimeout(spotPickerSyncTimer); spotPickerSyncTimer = null; }
+}
+
+function nearestSpot(lat, lng) {
+  return MAP_SPOTS.map((spot) => ({ spot, d: haversineKm(lat, lng, spot.lat, spot.lng) })).sort((a, b) => a.d - b.d)[0];
+}
+
+function initSpotPicker(hostId, initial, onPick) {
+  closeSpotPicker();
+  const host = $('#' + hostId);
+  if (!host || typeof L === 'undefined') return null;
+  const start = initial || MAP_SPOTS[0];
+  const readout = $('#' + hostId + 'Readout');
+  spotPickerMap = L.map(host, {
+    center: [start.lat, start.lng],
+    zoom: 15,
+    zoomControl: false,
+    attributionControl: true,
+    scrollWheelZoom: false
+  });
+  spotPickerMap._tileLayer = buildTileLayer(MAP_TILES.amap, spotPickerMap, false);
+  const pin = document.createElement('div');
+  pin.className = 'spot-picker-pin';
+  pin.innerHTML = '<i></i>';
+  host.appendChild(pin);
+  const sync = () => {
+    spotPickerSyncTimer = null;
+    if (!spotPickerMap) return;
+    const center = spotPickerMap.getCenter();
+    state.pickedSpot = { lat: Number(center.lat.toFixed(6)), lng: Number(center.lng.toFixed(6)) };
+    const near = nearestSpot(center.lat, center.lng);
+    if (readout) {
+      readout.textContent = near.d < 0.5
+        ? `靠近「${near.spot.label}」· 约 ${Math.max(1, Math.round(near.d * 1000))}m`
+        : `自选位置 · 距「${near.spot.label}」约 ${near.d.toFixed(1)}km`;
+    }
+    syncSpotChips(near.d < 0.08 ? near.spot.id : null);
+    if (onPick) onPick(state.pickedSpot);
+  };
+  spotPickerMap.on('move', () => {
+    if (spotPickerSyncTimer) return;
+    spotPickerSyncTimer = setTimeout(sync, 120);
+  });
+  spotPickerMap.whenReady(sync);
+  setTimeout(() => { if (spotPickerMap) { spotPickerMap.invalidateSize(); sync(); } }, 80);
+  return spotPickerMap;
+}
+
+function syncSpotChips(activeId) {
+  $$('.spot-chip').forEach((chip) => chip.classList.toggle('is-active', chip.dataset.pickerSpot === activeId));
+}
+
+function pickSpotById(id) {
+  const spot = MAP_SPOTS.find((item) => item.id === id);
+  if (!spot || !spotPickerMap) return;
+  spotPickerMap.setView([spot.lat, spot.lng], Math.max(spotPickerMap.getZoom(), 15));
 }
 
 function simplePhotoPicker(title, current, action) {
@@ -1703,7 +1907,7 @@ function articleModal(post) {
       <div class="article-byline">${contributorAvatar(post.author, post.avatar, post.tone)}<div><b>${esc(post.author)}</b><span>${esc(post.place)} · ${esc(post.time)}</span><small class="contributor-line">${contributorBadge(post.author, true)}</small></div><span class="article-date">FIELD NOTE</span></div>
       <div class="article-body">${post.body}</div>
       <div class="article-actions"><button class="article-stat ${isLiked(post) ? 'is-liked' : ''}" type="button" data-like-post="${post.id}" aria-pressed="${isLiked(post)}">${icon('heart')}<span>${postLikes(post)}</span> 点赞</button><span class="article-stat">${icon('square')}<span>${postCommentCount(post)}</span> 条回应</span></div>
-      <div class="comments"><h3>邻里回应 · <span data-comment-total>${postCommentCount(post)}</span></h3><div data-comment-list>${(post.commentsList || []).map((c) => `<div class="comment">${contributorAvatar(c.name, c.name.slice(0, 1))}<div class="comment-copy"><div class="comment-byline"><b>${esc(c.name)}</b>${contributorBadge(c.name, true)}${c.time ? `<small>${esc(c.time)}</small>` : ''}</div><p>${esc(c.text)}</p></div></div>`).join('')}</div><form class="comment-form" id="webCommentForm" data-post-id="${post.id}"><label class="sr-only" for="webCommentText">写下你的回应</label><textarea class="textarea" id="webCommentText" name="text" placeholder="说说你的经验，或问一个具体问题。"></textarea><div class="comment-form-foot"><span>${contributorBadge('林小满', true)}</span><button class="btn btn-primary" type="submit">发出回应</button></div><div class="form-error" role="alert"></div></form></div>
+      <div class="comments"><h3>邻里回应 · <span data-comment-total>${postCommentCount(post)}</span></h3><div data-comment-list>${(post.commentsList || []).map((c) => `<div class="comment">${contributorAvatar(c.name, c.name.slice(0, 1))}<div class="comment-copy"><div class="comment-byline"><b>${esc(c.name)}</b>${contributorBadge(c.name, true)}${c.time ? `<small>${esc(c.time)}</small>` : ''}</div><p>${esc(c.text)}</p></div></div>`).join('')}</div><form class="comment-form" id="webCommentForm" data-post-id="${post.id}"><label class="sr-only" for="webCommentText">写下你的回应</label><textarea class="textarea" id="webCommentText" name="text" placeholder="说说你的经验，或问一个具体问题。"></textarea><div class="comment-form-foot"><span>${state.user ? contributorBadge(state.user.name, true) : `<button type="button" class="auth-inline-link" data-action="account">登录后回应</button>`}</span><button class="btn btn-primary" type="submit">发出回应</button></div><div class="form-error" role="alert"></div></form></div>
     </div>`, 'article-web');
 }
 
@@ -1934,12 +2138,12 @@ function companionModal(prefillPlace = '') {
 function reviewModal(service) {
   if (!service) return;
   state.reviewStars = state.reviewStars || 5;
-  modal(`<h2>分享一次真实体验</h2><p class="modal-sub">${esc(service.name)} · 评价会公开，商家可回复但不能删除，不同体验都会被保留。</p><form id="webReviewForm" style="margin-top:14px"><div class="form-field"><label>你给几颗星</label><div class="star-picker">${[1,2,3,4,5].map((n) => `<button type="button" class="${n <= state.reviewStars ? 'is-on' : ''}" data-web-star="${n}" aria-label="${n} 星">${icon('star')}</button>`).join('')}</div></div><div class="form-field"><label for="webReviewText">具体说说</label><textarea class="textarea" id="webReviewText" name="text" placeholder="什么让你觉得好？有什么需要提醒后来的人？"></textarea></div><div class="form-row"><div class="form-field"><label for="webReviewGood">最值得肯定</label><select class="select" id="webReviewGood" name="good">${['对猫温柔', '不推销', '价格透明', '环境干净', '适合新手'].map((v) => `<option>${v}</option>`).join('')}</select></div><div class="form-field"><label for="webReviewBad">需要提醒</label><select class="select" id="webReviewBad" name="bad">${['没有', '周末人多', '等位较久', '停车不便', '价格偏高'].map((v) => `<option>${v}</option>`).join('')}</select></div></div><div class="review-identity">${contributorAvatar('林小满', '林')}<div><b>林小满</b><span>${contributorBadge('林小满', true)}</span></div><small>评价会显示你的实名与社区贡献</small></div><div class="form-error" role="alert"></div><div class="modal-actions"><button class="btn" type="button" data-close-modal>取消</button><button class="btn btn-primary" type="submit">发布评价</button></div></form>`);
+  modal(`<h2>分享一次真实体验</h2><p class="modal-sub">${esc(service.name)} · 评价会公开，商家可回复但不能删除，不同体验都会被保留。</p><form id="webReviewForm" style="margin-top:14px"><div class="form-field"><label>你给几颗星</label><div class="star-picker">${[1,2,3,4,5].map((n) => `<button type="button" class="${n <= state.reviewStars ? 'is-on' : ''}" data-web-star="${n}" aria-label="${n} 星">${icon('star')}</button>`).join('')}</div></div><div class="form-field"><label for="webReviewText">具体说说</label><textarea class="textarea" id="webReviewText" name="text" placeholder="什么让你觉得好？有什么需要提醒后来的人？"></textarea></div><div class="form-row"><div class="form-field"><label for="webReviewGood">最值得肯定</label><select class="select" id="webReviewGood" name="good">${['对猫温柔', '不推销', '价格透明', '环境干净', '适合新手'].map((v) => `<option>${v}</option>`).join('')}</select></div><div class="form-field"><label for="webReviewBad">需要提醒</label><select class="select" id="webReviewBad" name="bad">${['没有', '周末人多', '等位较久', '停车不便', '价格偏高'].map((v) => `<option>${v}</option>`).join('')}</select></div></div><div class="review-identity">${contributorAvatar(state.user.name, state.user.avatar)}<div><b>${esc(state.user.name)}</b><span>${contributorBadge(state.user.name, true)}</span></div><small>评价会显示你的昵称与社区贡献</small></div><div class="form-error" role="alert"></div><div class="modal-actions"><button class="btn" type="button" data-close-modal>取消</button><button class="btn btn-primary" type="submit">发布评价</button></div></form>`);
 }
 
 function placeModal(service) {
   const s = service || null;
-  const isEdit = Boolean(s && s.type === '遛猫的地方' && s.submittedBy === '林小满');
+  const isEdit = Boolean(s && s.type === '遛猫的地方' && s.submittedBy === userName());
   const draft = state.placeDraft && state.placeDraft.id === (s ? s.id : '') ? state.placeDraft : null;
   const sourcePhotos = draft && Array.isArray(draft.photos) ? draft.photos : (s && Array.isArray(s.photos) ? s.photos : []);
   const photos = [0, 1, 2].map((index) => sourcePhotos[index] || '');
@@ -1950,11 +2154,21 @@ function placeModal(service) {
     <div class="form-field"><label for="webPlaceEnvironment">环境描述</label><textarea class="textarea" id="webPlaceEnvironment" name="environment" placeholder="路面是否平整？有没有树荫、长椅、水源？人多不多？">${field('environment', s && s.details ? (s.details.environment || '') : '')}</textarea></div>
     <div class="form-field"><label for="webPlaceAdvice">优点、适合谁，以及要提醒的时段</label><textarea class="textarea" id="webPlaceAdvice" name="advice" placeholder="比如：适合已经习惯牵绳的猫；傍晚遛狗的人多，建议错峰；第一次出门先用推车。">${field('advice', s && s.details ? (s.details.advice || '') : '')}</textarea></div>
     <div class="form-field"><label for="webPlaceExperience">你的遛猫心得（可选）</label><textarea class="textarea" id="webPlaceExperience" name="experience" placeholder="第一次带猫来是什么反应？哪一段最好走？有什么只有走过才知道的细节？">${field('experience', s && s.details ? (s.details.experience || '') : '')}</textarea></div>
-    <div class="form-row"><div class="form-field"><label for="webPlaceHours">适合时段</label><input class="input" id="webPlaceHours" name="hours" placeholder="比如：全天开放 · 建议傍晚" value="${field('hours', s ? s.hours : '')}" /></div><div class="form-field"><label for="webPlaceSpot">地图落点</label><div class="select-wrap"><select class="select" id="webPlaceSpot" name="spot">${MAP_SPOTS.map((spot) => `<option value="${spot.id}" ${(draft && draft.spot ? draft.spot : (s ? s.spot : state.placeSpot)) === spot.id ? 'selected' : ''}>${esc(spot.label)}</option>`).join('')}</select></div></div></div>
+    <div class="form-row"><div class="form-field"><label for="webPlaceHours">适合时段</label><input class="input" id="webPlaceHours" name="hours" placeholder="比如：全天开放 · 建议傍晚" value="${field('hours', s ? s.hours : '')}" /></div></div>
+    <div class="form-field"><label>地图落点<small>拖动地图，把中央图钉对准位置；或选常用落点</small></label><div id="webPlacePickerHost" class="spot-picker"></div><p class="spot-picker-readout" id="webPlacePickerHostReadout"></p><div class="spot-chips">${MAP_SPOTS.map((spot) => `<button type="button" class="spot-chip" data-picker-spot="${spot.id}">${esc(spot.label)}</button>`).join('')}</div><p class="field-help">${icon('pin')}坐标用于地图展示与就近查重，公开时仍打码到街区。</p></div>
     <div class="form-field"><label>环境照片（可选，最多 3 张）</label><div class="place-photo-line">${[0,1,2].map((index) => { const photo = photos[index]; return `<button type="button" class="place-photo ${photo ? 'has-photo' : ''}" data-action="pick-place-photo" data-slot="${index}">${photo ? `<img src="${photoSrc(photo)}" alt="" />` : `${icon('camera')}<span>${index === 0 ? '主图' : '补充'}</span>`}</button>`; }).join('')}</div><p class="field-help">${icon('image')}只放公共环境照片，不要拍到具体住户门牌或陌生人正脸。</p></div>
     <label class="check-line"><input type="checkbox" name="truth" ${draft ? (draft.truth !== false ? 'checked' : '') : (s ? 'checked' : '')} /><span>我确认这是自己实际走过的公共区域，愿意让邻里补充不同体验。</span></label>
     <div class="form-error" role="alert"></div><div class="modal-actions"><button class="btn" type="button" data-close-modal>先不分享</button><button class="btn btn-primary" type="submit">${isEdit ? '保存地点信息' : '发布遛猫地点'}</button></div>
   </form>`);
+  const initialPick = (draft && Number.isFinite(Number(draft.lat))) ? { lat: Number(draft.lat), lng: Number(draft.lng) }
+    : (s && Number.isFinite(Number(s.lat))) ? { lat: Number(s.lat), lng: Number(s.lng) }
+    : (state.geo ? { lat: state.geo.lat, lng: state.geo.lng }
+    : (MAP_SPOTS.find((item) => item.id === state.placeSpot) || MAP_SPOTS[0]));
+  initSpotPicker('webPlacePickerHost', initialPick, (picked) => {
+    if (!state.placeDraft) state.placeDraft = {};
+    state.placeDraft.lat = picked.lat;
+    state.placeDraft.lng = picked.lng;
+  });
 }
 
 
@@ -2007,6 +2221,16 @@ function renderApp(options = {}) {
   view.innerHTML = currentPage();
   bindSearch();
   initLiveMap();
+  if (state.page === 'publish') {
+    const host = $('#webPubPickerHost');
+    if (host && (!spotPickerMap || !host.contains(spotPickerMap.getContainer()))) {
+      initSpotPicker('webPubPickerHost', state.publish.picked || MAP_SPOTS.find((item) => item.id === state.publish.spot) || MAP_SPOTS[0], (picked) => {
+        state.publish.picked = picked;
+      });
+    }
+  } else if (spotPickerMap && state.page !== 'service') {
+    closeSpotPicker();
+  }
   window.scrollTo({ top: preserveScroll ? scrollY : 0, left: 0, behavior: 'auto' });
 }
 
@@ -2049,6 +2273,7 @@ function openService(id) {
 }
 
 function toggleFavorite(id) {
+  if (!requireAuth()) return;
   const cat = catById(id);
   const shouldFavorite = !state.favorites.includes(id);
   if (state.favorites.includes(id)) {
@@ -2064,6 +2289,7 @@ function toggleFavorite(id) {
 }
 
 function toggleLike(id) {
+  if (!requireAuth()) return;
   if (state.likedPosts.includes(id)) {
     state.likedPosts = state.likedPosts.filter((item) => item !== id);
     toast('已取消点赞');
@@ -2198,9 +2424,10 @@ function locationModal() {
   modal(`
     <div class="location-modal">
       <h2>你现在看的是哪一带</h2>
-      <p class="modal-sub">切换区域后，附近发现、猫口地图与好店会一起更新。位置只用于筛选，不记录精确坐标。</p>
+      <p class="modal-sub">切换区域后，附近发现、猫口地图与好店会一起更新。定位只在本机用于计算距离，不上传服务器。</p>
       <div class="location-list">
-        ${places.map((place) => `<button type="button" class="location-option ${state.location === place.name ? 'is-active' : ''}" data-location="${esc(place.name)}"><span>${icon('pin')}<b>${esc(place.name)}</b></span><small>${esc(place.meta)}</small>${state.location === place.name ? icon('check') : icon('chevron')}</button>`).join('')}
+        <button type="button" class="location-option ${state.geo ? 'is-active' : ''}" data-action="use-geo"><span>${icon('locate')}<b>使用我的位置</b></span><small>${state.geo ? '已开启 · 距离按你的真实位置计算' : '按你的真实位置计算附近发现与好店的距离'}</small>${state.geo ? icon('check') : icon('chevron')}</button>
+        ${places.map((place) => `<button type="button" class="location-option ${!state.geo && state.location === place.name ? 'is-active' : ''}" data-location="${esc(place.name)}"><span>${icon('pin')}<b>${esc(place.name)}</b></span><small>${esc(place.meta)}</small>${!state.geo && state.location === place.name ? icon('check') : icon('chevron')}</button>`).join('')}
       </div>
     </div>`);
 }
@@ -2277,10 +2504,24 @@ function handleAction(name, el) {
     toast('已移除这张照片');
     return;
   }
-  if (name === 'compose') { composeModal(); return; }
-  if (name === 'compose-companion') { companionModal(el.dataset.place || ''); return; }
-  if (name === 'add-walk-place') { placeModal(null); return; }
+  if (name === 'account') { accountModal(); return; }
+  if (name === 'use-geo') {
+    if (state.geo) {
+      saveGeo(null);
+      renderHeader();
+      renderApp({ preserveScroll: true });
+      locationModal();
+      toast('已切回杭州演示区');
+    } else {
+      requestGeolocation();
+    }
+    return;
+  }
+  if (name === 'compose') { if (requireAuth()) composeModal(); return; }
+  if (name === 'compose-companion') { if (requireAuth()) companionModal(el.dataset.place || ''); return; }
+  if (name === 'add-walk-place') { if (requireAuth()) placeModal(null); return; }
   if (name === 'edit-walk-place') {
+    if (!requireAuth()) return;
     const service = allPlaces().find((item) => item.id === el.dataset.id);
     placeModal(service);
     return;
@@ -2310,6 +2551,7 @@ function handleAction(name, el) {
     return;
   }
   if (name === 'write-review') {
+    if (!requireAuth()) return;
     const service = allPlaces().find((item) => item.id === el.dataset.id) || allPlaces().find((item) => item.id === state.selectedService);
     state.reviewService = service ? service.id : state.selectedService;
     reviewModal(service);
@@ -2365,6 +2607,26 @@ function handleAction(name, el) {
 }
 
 document.addEventListener('click', (event) => {
+  const authTab = event.target.closest('[data-auth-tab]');
+  if (authTab) { event.preventDefault(); authModal(authTab.dataset.authTab); return; }
+
+  if (event.target.closest('[data-logout]')) {
+    event.preventDefault();
+    saveAuth('');
+    state.user = null;
+    state.favorites = [];
+    state.applications = [];
+    state.adoptions = [];
+    state.likedPosts = [];
+    closeModal();
+    toast('已退出登录');
+    renderApp();
+    return;
+  }
+
+  const chip = event.target.closest('[data-picker-spot]');
+  if (chip) { event.preventDefault(); pickSpotById(chip.dataset.pickerSpot); return; }
+
   const close = event.target.closest('[data-close-modal]');
   if (close) { event.preventDefault(); closeModal(); return; }
 
@@ -2503,8 +2765,14 @@ document.addEventListener('click', (event) => {
   const location = event.target.closest('[data-location]');
   if (location) {
     state.location = location.dataset.location;
+    if (state.geo) {
+      state.geo = null;
+      saveGeo(null);
+      applyGeoDistances();
+    }
     save();
     renderHeader();
+    renderApp({ preserveScroll: true });
     locationModal();
     toast(`已切换到 ${state.location}`);
     return;
@@ -2568,7 +2836,7 @@ function reopenUploadTarget(target, slot) {
   if (target === 'compose') { simplePhotoPicker('给这条笔记配一张照片', state.composePhoto, 'compose'); return; }
   if (target === 'place') {
     const service = allPlaces().find((item) => item.id === state.selectedService);
-    const editable = service && service.type === '遛猫的地方' && service.submittedBy === '林小满' ? service : null;
+    const editable = service && service.type === '遛猫的地方' && service.submittedBy === userName() ? service : null;
     placeModal(editable);
     return;
   }
@@ -2630,8 +2898,53 @@ document.addEventListener('change', (event) => {
 document.addEventListener('submit', (event) => {
   const form = event.target;
 
+  if (form.id === 'webAuthForm') {
+    event.preventDefault();
+    const data = new FormData(form);
+    const mode = form.dataset.mode === 'register' ? 'register' : 'login';
+    const payload = {
+      username: String(data.get('username') || '').trim(),
+      password: String(data.get('password') || '')
+    };
+    if (mode === 'register') {
+      payload.nickname = String(data.get('nickname') || '').trim();
+      payload.password2 = String(data.get('password2') || '');
+    }
+    const error = $('.form-error', form);
+    if (!payload.username) { if (error) error.textContent = '写一个用户名吧。'; return; }
+    if (mode === 'register' && payload.password.length < 6) { if (error) error.textContent = '密码至少 6 位。'; return; }
+    if (mode === 'register' && payload.password !== payload.password2) { if (error) error.textContent = '两次输入的密码不一致。'; return; }
+    if (!payload.password) { if (error) error.textContent = '输入密码。'; return; }
+    API.request(mode === 'register' ? '/api/auth/register' : '/api/auth/login', { method: 'POST', body: JSON.stringify(payload) }).then((res) => {
+      saveAuth(res.token);
+      closeModal();
+      toast(`欢迎，${res.user.name}`);
+      return refreshBootstrap();
+    }).catch((requestError) => {
+      if (error) error.textContent = requestError.message;
+    });
+    return;
+  }
+
+  if (form.id === 'webProfileForm') {
+    event.preventDefault();
+    if (!state.user) return;
+    const data = new FormData(form);
+    const error = $('.form-error', form);
+    API.request('/api/auth/profile', { method: 'POST', body: JSON.stringify({ nickname: String(data.get('nickname') || '').trim(), area: String(data.get('area') || '').trim() }) }).then((payload) => {
+      applyBootstrap(payload);
+      closeModal();
+      toast('资料已更新');
+      renderApp({ preserveScroll: true });
+    }).catch((requestError) => {
+      if (error) error.textContent = requestError.message;
+    });
+    return;
+  }
+
   if (form.id === 'webApplyForm') {
     event.preventDefault();
+    if (!requireAuth()) return;
     const data = new FormData(form);
     const error = $('.form-error', form);
     const name = String(data.get('name') || '').trim();
@@ -2661,6 +2974,7 @@ document.addEventListener('submit', (event) => {
 
   if (form.id === 'webPublishForm') {
     event.preventDefault();
+    if (!requireAuth()) return;
     capturePublishForm();
     const p = state.publish;
     if (!p.photos[0]) { toast('先给猫选一张照片吧'); return; }
@@ -2668,6 +2982,7 @@ document.addEventListener('submit', (event) => {
     if (!p.area.trim()) { toast('请填一个大致位置，不需要门牌号'); $('#webPubArea')?.focus(); return; }
     const ageGroup = p.age === '0–1 个月' || p.age === '1–3 个月' || p.age === '3–12 个月' ? '幼年' : p.age === '3 岁以上' ? '老年' : '成年';
     const spot = MAP_SPOTS.find((item) => item.id === p.spot) || MAP_SPOTS[0];
+    const picked = state.publish.picked || { lat: spot.lat, lng: spot.lng };
     const cat = {
       id: 'pub-' + Date.now(),
       name: p.name.trim(),
@@ -2687,11 +3002,11 @@ document.addEventListener('submit', (event) => {
       healthTags: [p.sterilized ? '疑似绝育' : '未绝育', p.friendly ? '亲人' : '怕生', '待核验'],
       traits: ['待补充'],
       note: p.note.trim() || '邻里刚刚上报，更多信息还在补充中。',
-      reporter: '林小满',
-      reporterRole: '翠苑二区 · 已实名',
+      reporter: state.user.name,
+      reporterRole: `${state.user.area || '附近邻里'} · 邻里认证`,
       time: '刚刚',
-      lat: spot.lat + (Math.random() - 0.5) * 0.0007,
-      lng: spot.lng + (Math.random() - 0.5) * 0.0009,
+      lat: picked.lat + (Math.random() - 0.5) * 0.0007,
+      lng: picked.lng + (Math.random() - 0.5) * 0.0009,
       verification: '待核验',
       views: 0,
       applications: 0,
@@ -2721,6 +3036,7 @@ document.addEventListener('submit', (event) => {
 
   if (form.id === 'webComposeForm') {
     event.preventDefault();
+    if (!requireAuth()) return;
     const data = new FormData(form);
     const title = String(data.get('title') || '').trim();
     const body = String(data.get('body') || '').trim();
@@ -2731,8 +3047,8 @@ document.addEventListener('submit', (event) => {
     }
     const post = {
       id: 'p' + Date.now(),
-      author: '林小满',
-      avatar: '林',
+      author: state.user.name,
+      avatar: state.user.avatar,
       tone: '',
       time: '刚刚',
       place: String(data.get('place') || '翠苑二区').trim(),
@@ -2760,6 +3076,7 @@ document.addEventListener('submit', (event) => {
 
   if (form.id === 'webCompanionForm') {
     event.preventDefault();
+    if (!requireAuth()) return;
     const data = new FormData(form);
     const title = String(data.get('title') || '').trim();
     const body = String(data.get('body') || '').trim();
@@ -2771,7 +3088,7 @@ document.addEventListener('submit', (event) => {
     if (!title || !body) { if (error) error.textContent = '写清楚想找什么样的搭子，以及自家猫的适应程度。'; return; }
     if (!data.get('safe')) { if (error) error.textContent = '请先确认公开地点见面和猫的应激边界。'; return; }
     const post = {
-      id: 'p' + Date.now(), author: '林小满', avatar: '林', tone: '', time: '刚刚', place,
+      id: 'p' + Date.now(), author: state.user.name, avatar: state.user.avatar, tone: '', time: '刚刚', place,
       tag: '猫友同路', tagClass: 'is-companion', title, excerpt: body.slice(0, 70),
       likes: 0, comments: 0, image: '', featured: false,
       body: `<p>${esc(body).replace(/\n/g, '<br />')}</p><p class="companion-meta">见面地点：${esc(place)}${time ? ' · ' + esc(time) : ''}<br />自家猫：${esc(cat)}<br />希望遇到：${esc(want)}</p>`,
@@ -2789,6 +3106,7 @@ document.addEventListener('submit', (event) => {
 
   if (form.id === 'webCommentForm') {
     event.preventDefault();
+    if (!requireAuth()) return;
     const data = new FormData(form);
     const text = String(data.get('text') || '').trim();
     const error = $('.form-error', form);
@@ -2798,7 +3116,7 @@ document.addEventListener('submit', (event) => {
     }
     const post = postById(form.dataset.postId);
     if (!post) return;
-    const comment = { name: '林小满', text, time: '刚刚' };
+    const comment = { name: state.user.name, text, time: '刚刚' };
     post.commentsList = (post.commentsList || []).concat(comment);
     post.comments = post.commentsList.length;
     const savedIndex = state.posts.findIndex((item) => item.id === post.id);
@@ -2813,6 +3131,7 @@ document.addEventListener('submit', (event) => {
 
   if (form.id === 'webPlaceForm') {
     event.preventDefault();
+    if (!requireAuth()) return;
     const data = new FormData(form);
     const name = String(data.get('name') || '').trim();
     const area = String(data.get('area') || '').trim();
@@ -2829,7 +3148,9 @@ document.addEventListener('submit', (event) => {
       if (error) error.textContent = '补一句环境描述和适合/提醒，别人才能判断要不要去。';
       return;
     }
-    const spot = MAP_SPOTS.find((item) => item.id === String(data.get('spot') || '')) || MAP_SPOTS.find((item) => item.id === state.placeSpot) || MAP_SPOTS[0];
+    const spot = MAP_SPOTS.find((item) => item.id === state.placeSpot) || MAP_SPOTS[0];
+    const pickedLat = state.placeDraft && Number.isFinite(Number(state.placeDraft.lat)) ? Number(state.placeDraft.lat) : spot.lat;
+    const pickedLng = state.placeDraft && Number.isFinite(Number(state.placeDraft.lng)) ? Number(state.placeDraft.lng) : spot.lng;
     const existing = allPlaces().find((item) => item.id === form.dataset.id);
     const photos = state.placeDraft && Array.isArray(state.placeDraft.photos)
       ? state.placeDraft.photos.filter(Boolean)
@@ -2851,10 +3172,12 @@ document.addEventListener('submit', (event) => {
       phone: existing ? existing.phone : '',
       note: environment,
       spot: spot.id,
+      lat: pickedLat,
+      lng: pickedLng,
       photos,
       details: { environment, advice, experience },
-      submittedBy: '林小满',
-      reviews: existing ? existing.reviews : [{ name: '林小满', avatar: '林', tone: '', stars: 5, time: '刚刚', text: advice, tags: ['邻里实走'], photos }]
+      submittedBy: state.user.name,
+      reviews: existing ? existing.reviews : [{ name: state.user.name, avatar: state.user.avatar, tone: '', stars: 5, time: '刚刚', text: advice, tags: ['邻里实走'], photos }]
     };
     if (existing) Object.assign(existing, place);
     else SERVICES.unshift(place);
@@ -2864,7 +3187,17 @@ document.addEventListener('submit', (event) => {
     state.placePhoto = null;
     state.placeDraft = null;
     save();
-    apiWrite('/api/places', { method: 'POST', body: JSON.stringify({ id: place.id, name, type: '遛猫的地方', area, address: area, lat: spot.lat, lng: spot.lng, environment, advice, experience, hours, photos: photos }) });
+    apiWrite('/api/places', { method: 'POST', body: JSON.stringify({ id: place.id, name, type: '遛猫的地方', area, address: area, lat: pickedLat, lng: pickedLng, environment, advice, experience, hours, photos: photos }) }).then((payload) => {
+      if (payload && payload.duplicateOf) {
+        const svcIndex = SERVICES.findIndex((item) => item.id === place.id);
+        if (svcIndex >= 0) SERVICES.splice(svcIndex, 1);
+        state.places = state.places.filter((item) => item.id !== place.id);
+        save();
+        state.servicesFilter = '遛猫地点';
+        toast(`这里已经有一条「${payload.duplicateName}」，带你去看看`);
+        openService(payload.duplicateOf);
+      }
+    });
     state.servicesFilter = '遛猫地点';
     state.selectedService = place.id;
     closeModal();
@@ -2877,6 +3210,7 @@ document.addEventListener('submit', (event) => {
 
   if (form.id === 'webReviewForm') {
     event.preventDefault();
+    if (!requireAuth()) return;
     const data = new FormData(form);
     const text = String(data.get('text') || '').trim();
     const error = $('.form-error', form);
@@ -2889,7 +3223,7 @@ document.addEventListener('submit', (event) => {
       const good = String(data.get('good') || '').trim();
       const bad = String(data.get('bad') || '').trim();
       const tags = [good, bad].filter((tag) => tag && tag !== '没有');
-      service.reviews.unshift({ name: '林小满', avatar: '林', tone: '', stars: state.reviewStars, time: '刚刚', text, tags });
+      service.reviews.unshift({ name: state.user.name, avatar: state.user.avatar, tone: '', stars: state.reviewStars, time: '刚刚', text, tags });
       service.rating = Number(((Number(service.rating) * service.count + state.reviewStars) / (service.count + 1)).toFixed(1));
       service.count += 1;
       const savedIndex = state.places.findIndex((item) => item.id === service.id);
@@ -2927,6 +3261,7 @@ window.addEventListener('popstate', () => {
 });
 
 load();
+if (state.geo) applyGeoDistances();
 if (API.enabled) {
   API.request('/api/bootstrap').then((payload) => {
     applyBootstrap(payload);
@@ -2936,6 +3271,7 @@ if (API.enabled) {
 const initialPage = hashPage();
 if (initialPage) state.page = initialPage;
 renderApp();
+if (API.enabled) setTimeout(maybeRequestGeo, 1200);
 
 window.xianmao = {
   state,
