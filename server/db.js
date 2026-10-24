@@ -34,6 +34,7 @@ function migrate(db) {
       password_hash TEXT,
       salt TEXT,
       token TEXT UNIQUE,
+      is_admin INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -180,10 +181,27 @@ function migrate(db) {
   `);
 
   const userColumns = db.prepare('PRAGMA table_info(users)').all().map((column) => column.name);
-  const authColumns = { username: 'TEXT UNIQUE', password_hash: 'TEXT', salt: 'TEXT', token: 'TEXT UNIQUE' };
+  const authColumns = { username: 'TEXT UNIQUE', password_hash: 'TEXT', salt: 'TEXT', token: 'TEXT UNIQUE', is_admin: 'INTEGER NOT NULL DEFAULT 0' };
   for (const [name, ddl] of Object.entries(authColumns)) {
     if (!userColumns.includes(name)) db.exec(`ALTER TABLE users ADD COLUMN ${name} ${ddl}`);
   }
+  // 内容软删除状态：published（可见）/ removed（管理员下架）
+  for (const table of ['cats', 'posts', 'places']) {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((column) => column.name);
+    if (!cols.includes('status')) db.exec(`ALTER TABLE ${table} ADD COLUMN status TEXT NOT NULL DEFAULT 'published'`);
+  }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS reports (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      target_type TEXT NOT NULL CHECK (target_type IN ('cat','post','comment','place','review')),
+      target_id TEXT NOT NULL,
+      reporter_id TEXT REFERENCES users (id) ON DELETE SET NULL,
+      reporter_name TEXT NOT NULL DEFAULT '',
+      reason TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','resolved')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
 }
 
 function seed(db) {
@@ -273,6 +291,7 @@ function bootstrap(db, userRow = null) {
   const catRows = db.prepare(`
     SELECT c.*, l.label AS location_label, l.area AS location_area, l.address AS location_address, l.lat, l.lng, l.coord_system
     FROM cats c LEFT JOIN locations l ON l.id = c.location_id
+    WHERE c.status != 'removed'
     ORDER BY c.reported_at DESC
   `).all();
   const cats = catRows.map((row) => ({
@@ -300,11 +319,13 @@ function bootstrap(db, userRow = null) {
       u.display_name AS submitter_name
     FROM places p LEFT JOIN locations l ON l.id = p.location_id
     LEFT JOIN users u ON u.id = p.submitted_by
+    WHERE p.status != 'removed'
     ORDER BY p.rating DESC
   `).all();
   const postRows = db.prepare(`
     SELECT p.*, u.avatar_text AS avatar_text, u.display_name AS author_display
     FROM posts p LEFT JOIN users u ON u.id = p.author_id
+    WHERE p.status != 'removed'
     ORDER BY p.created_at DESC
   `).all();
   const postIds = postRows.map((row) => row.id);
@@ -321,7 +342,8 @@ function bootstrap(db, userRow = null) {
   return {
     user: user ? {
       id: user.id, name: user.display_name, avatar: user.avatar_text, area: user.area,
-      verified: Boolean(user.verified), credit: user.credit, username: user.username || ''
+      verified: Boolean(user.verified), credit: user.credit, username: user.username || '',
+      isAdmin: Boolean(user.is_admin)
     } : null,
     cats,
     favorites: favoriteIds,

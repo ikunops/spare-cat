@@ -47,6 +47,54 @@ function requireUser(req, res) {
   return user;
 }
 
+function requireAdmin(req, res) {
+  const user = authUser(req);
+  if (!user) {
+    json(res, 401, { error: '请先登录' });
+    return null;
+  }
+  if (!user.is_admin) {
+    json(res, 403, { error: '需要管理员权限' });
+    return null;
+  }
+  return user;
+}
+
+// 本地敏感词库：重点拦截领养平台灰产话术（有偿领养变相交易、贩子引流）。
+// 保守取向：宁可漏过由人工巡检兜底，避免误伤正常邻里交流。
+const BLOCKED_WORDS = ['有偿', '营养费', '奶粉钱', '红包', '出售', '卖猫', '买猫', '收购', '贩子', '配种', '借配', '包活', '加v', '加微信', '加qq', 'vx', '威信', '看猫私聊', '转账', '代孕', '赌博'];
+
+function checkBlocked(pairs) {
+  for (const [field, value] of pairs) {
+    const text = String(value || '').toLowerCase();
+    const hit = BLOCKED_WORDS.find((word) => text.includes(word));
+    if (hit) return `「${field}」包含受限内容（${hit}），请修改后重发；如有疑问可联系管理员`;
+  }
+  return null;
+}
+
+function adminDashboard() {
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const count = (sql) => db.prepare(sql).get().n;
+  return {
+    counts: {
+      users: count('SELECT COUNT(*) AS n FROM users'),
+      cats: count("SELECT COUNT(*) AS n FROM cats WHERE status != 'removed'"),
+      pendingVerify: count("SELECT COUNT(*) AS n FROM cats WHERE verification = '待核验' AND status != 'removed'"),
+      adopted: count("SELECT COUNT(*) AS n FROM cats WHERE adoption_state = '已领养'"),
+      posts: count("SELECT COUNT(*) AS n FROM posts WHERE status != 'removed'"),
+      openReports: count("SELECT COUNT(*) AS n FROM reports WHERE status = 'open'"),
+      todayCats: count(`SELECT COUNT(*) AS n FROM cats WHERE date(reported_at) = '${todayStr}'`)
+    },
+    reports: db.prepare(`SELECT r.*, c.name AS cat_name FROM reports r LEFT JOIN cats c ON c.id = r.target_id AND r.target_type = 'cat' WHERE r.status = 'open' ORDER BY r.created_at DESC LIMIT 50`).all(),
+    cats: db.prepare(`SELECT id, name, status, verification, adoption_state, reporter_name, reported_at FROM cats ORDER BY reported_at DESC LIMIT 60`).all(),
+    posts: db.prepare(`SELECT id, title, status, author_name, created_at FROM posts ORDER BY created_at DESC LIMIT 60`).all(),
+    places: db.prepare(`SELECT p.id, p.name, p.status, u.display_name AS author_name, p.created_at FROM places p LEFT JOIN users u ON u.id = p.submitted_by ORDER BY p.created_at DESC LIMIT 60`).all(),
+    users: db.prepare(`SELECT id, display_name AS name, username, is_admin, created_at FROM users ORDER BY created_at ASC LIMIT 100`).all()
+  };
+}
+
 function json(res, status, body) {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
   res.end(JSON.stringify(body));
@@ -96,9 +144,10 @@ function api(req, res, url) {
       }
       const salt = crypto.randomBytes(16).toString('hex');
       const token = makeToken();
-      db.prepare(`INSERT INTO users (id, display_name, avatar_text, area, verified, credit, username, password_hash, salt, token)
-        VALUES (?, ?, ?, '', 0, 70, ?, ?, ?, ?)`)
-        .run(`u-${crypto.randomBytes(6).toString('hex')}`, nickname, nickname.slice(0, 1), username, hashPassword(password, salt), salt, token);
+      const isAdmin = db.prepare('SELECT COUNT(*) AS n FROM users WHERE is_admin = 1').get().n === 0 ? 1 : 0;
+      db.prepare(`INSERT INTO users (id, display_name, avatar_text, area, verified, credit, username, password_hash, salt, token, is_admin)
+        VALUES (?, ?, ?, '', 0, 70, ?, ?, ?, ?, ?)`)
+        .run(`u-${crypto.randomBytes(6).toString('hex')}`, nickname, nickname.slice(0, 1), username, hashPassword(password, salt), salt, token, isAdmin);
       const user = db.prepare('SELECT * FROM users WHERE token = ?').get(token);
       return json(res, 201, { token, ...bootstrap(db, user) });
     }).catch((error) => json(res, 400, { error: error.message }));
@@ -140,6 +189,8 @@ function api(req, res, url) {
       if (required.some((key) => data[key] === undefined || data[key] === '')) {
         return json(res, 400, { error: '缺少必要字段' });
       }
+      const blocked = checkBlocked([['猫名', data.name], ['说明', data.note]]);
+      if (blocked) return json(res, 400, { error: blocked });
       const id = `pub-${Date.now()}`;
       const locationId = findOrCreateLocation({
         label: data.area || '附近街区', area: (data.area || '').split('·')[0].trim(), address: data.area || '',
@@ -176,6 +227,8 @@ function api(req, res, url) {
       const cat = db.prepare('SELECT id FROM cats WHERE id = ?').get(catId);
       if (!cat) return json(res, 404, { error: '没有这只猫' });
       if (!data.name || !data.phone || !data.reason) return json(res, 400, { error: '申请信息不完整' });
+      const blocked = checkBlocked([['申请理由', data.reason]]);
+      if (blocked) return json(res, 400, { error: blocked });
       db.prepare(`INSERT INTO applications (cat_id, applicant_id, home_type, experience, reason, status)
         VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (cat_id, applicant_id) DO UPDATE SET
         home_type = excluded.home_type, experience = excluded.experience, reason = excluded.reason, status = '等待初审'`)
@@ -191,6 +244,8 @@ function api(req, res, url) {
     const placeId = decodeURIComponent(url.pathname.split('/')[3]);
     return body(req).then((data) => {
       if (!data.text) return json(res, 400, { error: '写一句真实感受吧' });
+      const blocked = checkBlocked([['评价', data.text]]);
+      if (blocked) return json(res, 400, { error: blocked });
       const stars = Math.max(1, Math.min(5, Number(data.stars || 5)));
       db.prepare('INSERT INTO place_reviews (place_id, user_id, author_name, stars, text, tags_json) VALUES (?, ?, ?, ?, ?, ?)')
         .run(placeId, user.id, user.display_name, stars, data.text, JSON.stringify(data.tags || []));
@@ -204,6 +259,8 @@ function api(req, res, url) {
       const user = requireUser(req, res);
       if (!user) return;
       if (!data.title || !data.body) return json(res, 400, { error: '标题和正文不能为空' });
+      const blocked = checkBlocked([['标题', data.title], ['正文', data.body]]);
+      if (blocked) return json(res, 400, { error: blocked });
       const id = String(data.id || `p-${Date.now()}`);
       const tag = String(data.tag || '邻里随记');
       const tagClass = tag === '捉猫实录' ? 'is-trap' : tag === '就医体验' ? 'is-pit' : tag === '猫咖打卡' ? 'is-checkin' : tag === '遛猫地点' ? 'is-walk' : tag === '猫友同路' ? 'is-companion' : '';
@@ -221,6 +278,8 @@ function api(req, res, url) {
     const postId = decodeURIComponent(url.pathname.split('/')[3]);
     return body(req).then((data) => {
       if (!data.text) return json(res, 400, { error: '评论不能为空' });
+      const blocked = checkBlocked([['评论', data.text]]);
+      if (blocked) return json(res, 400, { error: blocked });
       const post = db.prepare('SELECT id FROM posts WHERE id = ?').get(postId);
       if (!post) return json(res, 404, { error: '没有这篇笔记' });
       db.prepare('INSERT INTO comments (post_id, author_id, author_name, text, time_label) VALUES (?, ?, ?, ?, ?)').run(postId, user.id, user.display_name, data.text, '刚刚');
@@ -253,6 +312,8 @@ function api(req, res, url) {
       const user = requireUser(req, res);
       if (!user) return;
       if (!data.name || !data.area) return json(res, 400, { error: '地点名和区域不能为空' });
+      const blocked = checkBlocked([['地点名', data.name], ['环境描述', data.environment], ['适合与提醒', data.advice], ['遛猫心得', data.experience]]);
+      if (blocked) return json(res, 400, { error: blocked });
       const id = String(data.id || `walk-${Date.now()}`);
       const spot = db.prepare('SELECT * FROM places WHERE id = ?').get(id);
       const lat = Number(data.lat || 30.2886);
@@ -278,6 +339,76 @@ function api(req, res, url) {
           .run(id, data.name, '遛猫的地方', JSON.stringify(['邻里实走']), data.hours || '全天开放', data.environment || '', locationId, photos, details, user.id);
       }
       return json(res, 201, bootstrap(db, user));
+    }).catch((error) => json(res, 400, { error: error.message }));
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/reports') {
+    return body(req).then((data) => {
+      const user = requireUser(req, res);
+      if (!user) return;
+      const targetType = String(data.targetType || '');
+      const targetId = String(data.targetId || '');
+      const reason = String(data.reason || '').trim();
+      if (!['cat', 'post', 'comment', 'place', 'review'].includes(targetType) || !targetId || !reason) {
+        return json(res, 400, { error: '举报信息不完整' });
+      }
+      if (reason.length > 200) return json(res, 400, { error: '举报说明请控制在 200 字内' });
+      db.prepare('INSERT INTO reports (target_type, target_id, reporter_id, reporter_name, reason) VALUES (?, ?, ?, ?, ?)')
+        .run(targetType, targetId, user.id, user.display_name, reason);
+      return json(res, 201, { ok: true });
+    }).catch((error) => json(res, 400, { error: error.message }));
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/admin/dashboard') {
+    const admin = requireAdmin(req, res);
+    if (!admin) return;
+    return json(res, 200, adminDashboard());
+  }
+
+  if (req.method === 'POST' && /^\/api\/admin\/(cats|posts|places)\/[^/]+\/(verify|reject|remove|restore)$/.test(url.pathname)) {
+    const admin = requireAdmin(req, res);
+    if (!admin) return;
+    const [, , , kind, id, action] = url.pathname.split('/');
+    const sql = {
+      'cats:verify': "UPDATE cats SET verification = '已核验' WHERE id = ?",
+      'cats:reject': "UPDATE cats SET verification = '已退回' WHERE id = ?",
+      'cats:remove': "UPDATE cats SET status = 'removed' WHERE id = ?",
+      'cats:restore': "UPDATE cats SET status = 'published' WHERE id = ?",
+      'posts:remove': "UPDATE posts SET status = 'removed' WHERE id = ?",
+      'posts:restore': "UPDATE posts SET status = 'published' WHERE id = ?",
+      'places:remove': "UPDATE places SET status = 'removed' WHERE id = ?",
+      'places:restore': "UPDATE places SET status = 'published' WHERE id = ?"
+    }[`${kind}:${action}`];
+    if (!sql) return json(res, 400, { error: '未知操作' });
+    db.prepare(sql).run(id);
+    return json(res, 200, adminDashboard());
+  }
+
+  if (req.method === 'POST' && /^\/api\/admin\/comments\/[^/]+$/.test(url.pathname)) {
+    const admin = requireAdmin(req, res);
+    if (!admin) return;
+    const cid = Number(url.pathname.split('/')[4]);
+    if (!Number.isInteger(cid)) return json(res, 400, { error: '无效的评论 ID' });
+    db.prepare('DELETE FROM comments WHERE id = ?').run(cid);
+    return json(res, 200, adminDashboard());
+  }
+
+  if (req.method === 'POST' && /^\/api\/admin\/reports\/\d+\/resolve$/.test(url.pathname)) {
+    const admin = requireAdmin(req, res);
+    if (!admin) return;
+    db.prepare("UPDATE reports SET status = 'resolved' WHERE id = ?").run(Number(url.pathname.split('/')[4]));
+    return json(res, 200, adminDashboard());
+  }
+
+  if (req.method === 'POST' && /^\/api\/admin\/users\/[^/]+$/.test(url.pathname)) {
+    const admin = requireAdmin(req, res);
+    if (!admin) return;
+    return body(req).then((data) => {
+      const targetId = url.pathname.split('/')[4];
+      const isAdmin = Boolean(data.is_admin);
+      if (targetId === admin.id && !isAdmin) return json(res, 400, { error: '不能取消自己的管理员权限' });
+      db.prepare('UPDATE users SET is_admin = ? WHERE id = ?').run(isAdmin ? 1 : 0, targetId);
+      return json(res, 200, adminDashboard());
     }).catch((error) => json(res, 400, { error: error.message }));
   }
 

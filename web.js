@@ -37,6 +37,8 @@ const state = {
   user: null,
   authToken: '',
   geo: null,
+  adminData: null,
+  adminTab: 'reports',
   location: '翠苑 · 西湖区',
   query: '',
   quick: '全部',
@@ -385,6 +387,7 @@ function renderHeader() {
         ${NAV.map((item) => `<button type="button" class="${activePage === item.id ? 'is-active' : ''}" data-page="${item.id}" ${activePage === item.id ? 'aria-current="page"' : ''}>${item.label}</button>`).join('')}
       </nav>
       <div class="header-tools">
+        ${state.user && state.user.isAdmin ? `<button class="header-admin" type="button" data-page="admin" aria-label="管理后台">${icon('shield')}<span>管理</span></button>` : ''}
         <button class="header-user ${state.user ? '' : 'is-anon'}" type="button" data-action="account" aria-label="${state.user ? '账号与资料' : '登录或注册'}"><span class="header-user-avatar">${state.user ? esc(state.user.avatar) : icon('user')}</span><span>${state.user ? esc(state.user.name) : '登录'}</span></button>
         <button class="location-select" type="button" data-action="location">${icon('pin')}${state.geo ? '我的位置' : esc(state.location)}${icon('chevron-down')}</button>
         <button class="header-store ${activePage === 'services' ? 'is-active' : ''}" type="button" data-page="services" aria-label="查看附近好店" ${activePage === 'services' ? 'aria-current="page"' : ''}>${icon('store')}<span>好店</span></button>
@@ -1610,6 +1613,79 @@ function renderServiceDetail() {
 }
 
 /* 16-profile.js */
+function apiAdmin(path, body) {
+  return API.request(path, { method: 'POST', body: JSON.stringify(body || {}) }).then((payload) => {
+    state.adminData = payload;
+    renderApp({ preserveScroll: true });
+    return payload;
+  }).catch((error) => {
+    toast(error.message || '操作失败');
+    return null;
+  });
+}
+
+function renderAdmin() {
+  if (!state.user || !state.user.isAdmin) {
+    return `<div class="page-head"><div><div class="page-head-kicker">ADMIN · 管理后台</div><h1>需要管理员权限</h1><p>当前账号没有管理权限。如需开通，请联系现有管理员。</p></div></div>`;
+  }
+  const d = state.adminData;
+  if (!d) return `<div class="page-head"><div><div class="page-head-kicker">ADMIN · 管理后台</div><h1>运营看板</h1><p>正在加载…</p></div></div>`;
+  if (d.error) return `<div class="page-head"><div><h1>管理后台</h1><p>${esc(d.error)}</p></div></div>`;
+  const c = d.counts;
+  const tabs = [
+    { id: 'reports', label: `举报队列${c.openReports ? ' · ' + c.openReports : ''}` },
+    { id: 'verify', label: `待核验${c.pendingVerify ? ' · ' + c.pendingVerify : ''}` },
+    { id: 'content', label: '内容管理' },
+    { id: 'users', label: '用户' }
+  ];
+  if (!tabs.some((t) => t.id === state.adminTab)) state.adminTab = 'reports';
+  return `
+    <div class="admin-page">
+      <div class="page-head"><div><div class="page-head-kicker">ADMIN · 管理后台</div><h1>运营看板</h1><p>核验上报、处理举报、管理内容与用户。所有操作立即生效。</p></div></div>
+      <div class="admin-cards">${[['今日上报', c.todayCats], ['待核验', c.pendingVerify], ['已领养', c.adopted], ['注册用户', c.users], ['帖子', c.posts], ['待处理举报', c.openReports]].map(([label, n]) => `<div class="admin-card"><b>${Number(n)}</b><span>${label}</span></div>`).join('')}</div>
+      <div class="admin-tabs">${tabs.map((t) => `<button type="button" class="${state.adminTab === t.id ? 'is-active' : ''}" data-admin-tab="${t.id}">${t.label}</button>`).join('')}</div>
+      <div class="admin-body">${renderAdminBody(d)}</div>
+    </div>`;
+}
+
+function renderAdminBody(d) {
+  if (state.adminTab === 'reports') {
+    if (!d.reports.length) return `<p class="admin-empty">暂无待处理举报。</p>`;
+    return `<div class="admin-list">${d.reports.map((r) => `
+      <div class="admin-row">
+        <div class="admin-row-main"><b>${esc(r.reporter_name)} 举报了${esc(r.target_type)}${r.cat_name ? `「${esc(r.cat_name)}」` : `（${esc(r.target_id)}）`}</b><p>${esc(r.reason)}</p><small>${esc(r.created_at)}</small></div>
+        <div class="admin-row-actions">${r.target_type === 'cat' ? `<button class="btn btn-small" type="button" data-admin-action="cats" data-id="${esc(r.target_id)}" data-action-type="remove">下架该猫</button>` : ''}<button class="btn btn-small btn-primary" type="button" data-admin-resolve="${r.id}">标记已处理</button></div>
+      </div>`).join('')}</div>`;
+  }
+  if (state.adminTab === 'verify') {
+    const pending = d.cats.filter((cat) => cat.verification === '待核验' && cat.status !== 'removed');
+    if (!pending.length) return `<p class="admin-empty">没有待核验的上报。</p>`;
+    return `<div class="admin-list">${pending.map((cat) => `
+      <div class="admin-row">
+        <div class="admin-row-main"><b>${esc(cat.name)}</b><p>${esc(cat.reporter_name)} · ${esc(cat.reported_at)}</p></div>
+        <div class="admin-row-actions"><button class="btn btn-small btn-primary" type="button" data-admin-action="cats" data-id="${esc(cat.id)}" data-action-type="verify">通过核验</button><button class="btn btn-small" type="button" data-admin-action="cats" data-id="${esc(cat.id)}" data-action-type="reject">退回</button><button class="btn btn-small" type="button" data-admin-action="cats" data-id="${esc(cat.id)}" data-action-type="remove">下架</button></div>
+      </div>`).join('')}</div>`;
+  }
+  if (state.adminTab === 'content') {
+    const section = (title, items, kind) => `<h3 class="admin-section-title">${title}</h3><div class="admin-list">${items.length ? items.map((item) => `
+      <div class="admin-row ${item.status === 'removed' ? 'is-removed' : ''}">
+        <div class="admin-row-main"><b>${esc(item.name || item.title)}</b><p>${esc(item.author_name || '')} · ${esc(item.created_at)}</p></div>
+        <div class="admin-row-actions"><button class="btn btn-small ${item.status === 'removed' ? 'btn-primary' : ''}" type="button" data-admin-action="${kind}" data-id="${esc(item.id)}" data-action-type="${item.status === 'removed' ? 'restore' : 'remove'}">${item.status === 'removed' ? '恢复' : '下架'}</button></div>
+      </div>`).join('') : '<p class="admin-empty">暂无</p>'}</div>`;
+    return section('猫档案', d.cats, 'cats') + section('帖子', d.posts, 'posts') + section('地点', d.places, 'places');
+  }
+  return `<div class="admin-list">${d.users.map((u) => `
+    <div class="admin-row">
+      <div class="admin-row-main"><b>${esc(u.name)}</b><p>@${esc(u.username || u.id)} · 注册于 ${esc(u.created_at)}${u.is_admin ? ' · 管理员' : ''}</p></div>
+      <div class="admin-row-actions">${u.id === state.user.id ? '<span class="admin-self">当前账号</span>' : `<button class="btn btn-small" type="button" data-admin-user="${esc(u.id)}" data-is-admin="${u.is_admin ? 0 : 1}">${u.is_admin ? '取消管理员' : '设为管理员'}</button>`}</div>
+    </div>`).join('')}</div>`;
+}
+
+function reportModal(targetType, targetId) {
+  if (!requireAuth()) return;
+  modal(`<h2>举报这条内容</h2><p class="modal-sub">举报会进入管理队列，由管理员处理。恶意举报会被记录。</p><form id="webReportForm" data-type="${esc(targetType)}" data-id="${esc(targetId)}"><div class="form-field"><label>举报原因</label><div class="report-reasons">${['违规内容', '虚假信息', '变相交易或收费', '引流广告', '其他'].map((r, i) => `<label class="check-line"><input type="radio" name="reason" value="${r}" ${i === 0 ? 'checked' : ''} /><span>${r}</span></label>`).join('')}</div></div><div class="form-field"><label>补充说明（可选）</label><textarea class="textarea" name="detail" maxlength="200" placeholder="200 字内"></textarea></div><div class="form-error" role="alert"></div><div class="modal-actions"><button class="btn" type="button" data-close-modal>取消</button><button class="btn btn-primary" type="submit">提交举报</button></div></form>`);
+}
+
 function renderProfile() {
   const favList = allCats().filter((cat) => state.favorites.includes(cat.id));
   const adopted = state.adoptions || [];
@@ -1889,7 +1965,7 @@ function catModal() {
         <div class="detail-web-section"><h3>关于它</h3><p>${esc(cat.note)}</p></div>
         <div class="detail-web-section"><h3>健康与照护</h3><div class="detail-health"><div><span>绝育 / NEUTERED</span><b>${esc(cat.sterilization)}</b></div><div><span>疫苗 / VACCINE</span><b>${esc(cat.vaccine)}</b></div><div><span>驱虫 / DEWORMED</span><b>${esc(cat.deworm)}</b></div><div><span>寄养 / FOSTER</span><b>${esc(cat.foster)}</b></div></div><p style="font-size:9px;color:var(--muted)">${esc(cat.healthBadge)}。领养前建议再次确认近期状态，并预约一次基础体检。</p></div>
         <div class="detail-web-section"><h3>遇见它的地方</h3><div class="detail-location"><span class="mini-thumb"></span><div><b>${esc(cat.area)}</b><p>仅显示到街区。为保护猫咪安全，精确位置需与上报人确认后提供。</p></div></div></div>
-        <div class="detail-web-publisher"><span class="avatar ${cat.urgent ? 'is-orange' : ''}">${esc(cat.reporter.slice(0, 1))}</span><div><b>${esc(cat.reporter)}</b><span>${esc(cat.reporterRole)} · ${esc(cat.time)}</span></div><button class="btn btn-small" type="button" data-action="contact-reporter">${icon('send')}联系</button></div>
+        <div class="detail-web-publisher"><span class="avatar ${cat.urgent ? 'is-orange' : ''}">${esc(cat.reporter.slice(0, 1))}</span><div><b>${esc(cat.reporter)}</b><span>${esc(cat.reporterRole)} · ${esc(cat.time)}</span></div><button class="btn btn-small" type="button" data-action="contact-reporter">${icon('send')}联系</button><button class="report-link" type="button" data-action="report" data-type="cat" data-id="${cat.id}">举报</button></div>
         <div class="detail-web-actions"><button class="secondary-fav ${isFav(cat.id) ? 'is-active' : ''}" type="button" data-fav="${cat.id}" aria-label="${isFav(cat.id) ? '取消收藏' : '收藏'}">${icon('heart')}</button><button class="btn btn-primary" type="button" data-action="${applied ? 'view-application' : 'apply'}" data-id="${cat.id}" ${applied ? 'disabled' : ''}>${applied ? '申请已提交 · 等待初审' : '申请领养 · 先见面再决定'}</button></div>
       </div>
     </div>`, 'modal-detail');
@@ -1906,7 +1982,7 @@ function articleModal(post) {
       <h2 style="margin-top:12px">${esc(post.title)}</h2>
       <div class="article-byline">${contributorAvatar(post.author, post.avatar, post.tone)}<div><b>${esc(post.author)}</b><span>${esc(post.place)} · ${esc(post.time)}</span><small class="contributor-line">${contributorBadge(post.author, true)}</small></div><span class="article-date">FIELD NOTE</span></div>
       <div class="article-body">${post.body}</div>
-      <div class="article-actions"><button class="article-stat ${isLiked(post) ? 'is-liked' : ''}" type="button" data-like-post="${post.id}" aria-pressed="${isLiked(post)}">${icon('heart')}<span>${postLikes(post)}</span> 点赞</button><span class="article-stat">${icon('square')}<span>${postCommentCount(post)}</span> 条回应</span></div>
+      <div class="article-actions"><button class="article-stat ${isLiked(post) ? 'is-liked' : ''}" type="button" data-like-post="${post.id}" aria-pressed="${isLiked(post)}">${icon('heart')}<span>${postLikes(post)}</span> 点赞</button><span class="article-stat">${icon('square')}<span>${postCommentCount(post)}</span> 条回应</span><button class="report-link" type="button" data-action="report" data-type="post" data-id="${post.id}">举报</button></div>
       <div class="comments"><h3>邻里回应 · <span data-comment-total>${postCommentCount(post)}</span></h3><div data-comment-list>${(post.commentsList || []).map((c) => `<div class="comment">${contributorAvatar(c.name, c.name.slice(0, 1))}<div class="comment-copy"><div class="comment-byline"><b>${esc(c.name)}</b>${contributorBadge(c.name, true)}${c.time ? `<small>${esc(c.time)}</small>` : ''}</div><p>${esc(c.text)}</p></div></div>`).join('')}</div><form class="comment-form" id="webCommentForm" data-post-id="${post.id}"><label class="sr-only" for="webCommentText">写下你的回应</label><textarea class="textarea" id="webCommentText" name="text" placeholder="说说你的经验，或问一个具体问题。"></textarea><div class="comment-form-foot"><span>${state.user ? contributorBadge(state.user.name, true) : `<button type="button" class="auth-inline-link" data-action="account">登录后回应</button>`}</span><button class="btn btn-primary" type="submit">发出回应</button></div><div class="form-error" role="alert"></div></form></div>
     </div>`, 'article-web');
 }
@@ -2173,7 +2249,7 @@ function placeModal(service) {
 
 
 /* 27-app.js */
-const PAGE_IDS = ['home', 'map', 'publish', 'community', 'services', 'service', 'profile'];
+const PAGE_IDS = ['home', 'map', 'publish', 'community', 'services', 'service', 'profile', 'admin'];
 const TAB_ITEMS = [
   { id: 'home', label: '发现', icon: 'compass' },
   { id: 'map', label: '地图', icon: 'map' },
@@ -2206,7 +2282,8 @@ function currentPage() {
     community: renderCommunity,
     services: renderServices,
     service: renderServiceDetail,
-    profile: renderProfile
+    profile: renderProfile,
+    admin: renderAdmin
   };
   return (pages[state.page] || renderHome)();
 }
@@ -2230,6 +2307,15 @@ function renderApp(options = {}) {
     }
   } else if (spotPickerMap && state.page !== 'service') {
     closeSpotPicker();
+  }
+  if (state.page === 'admin' && state.user && state.user.isAdmin && !state.adminData) {
+    API.request('/api/admin/dashboard').then((payload) => {
+      state.adminData = payload;
+      renderApp({ preserveScroll: true });
+    }).catch((error) => {
+      state.adminData = { error: error.message || '加载失败' };
+      renderApp({ preserveScroll: true });
+    });
   }
   window.scrollTo({ top: preserveScroll ? scrollY : 0, left: 0, behavior: 'auto' });
 }
@@ -2505,6 +2591,7 @@ function handleAction(name, el) {
     return;
   }
   if (name === 'account') { accountModal(); return; }
+  if (name === 'report') { reportModal(el.dataset.type, el.dataset.id); return; }
   if (name === 'use-geo') {
     if (state.geo) {
       saveGeo(null);
@@ -2618,6 +2705,7 @@ document.addEventListener('click', (event) => {
     state.applications = [];
     state.adoptions = [];
     state.likedPosts = [];
+    state.adminData = null;
     closeModal();
     toast('已退出登录');
     renderApp();
@@ -2626,6 +2714,18 @@ document.addEventListener('click', (event) => {
 
   const chip = event.target.closest('[data-picker-spot]');
   if (chip) { event.preventDefault(); pickSpotById(chip.dataset.pickerSpot); return; }
+
+  const adminTabBtn = event.target.closest('[data-admin-tab]');
+  if (adminTabBtn) { event.preventDefault(); state.adminTab = adminTabBtn.dataset.adminTab; renderApp({ preserveScroll: true }); return; }
+
+  const adminActionBtn = event.target.closest('[data-admin-action]');
+  if (adminActionBtn) { event.preventDefault(); apiAdmin(`/api/admin/${adminActionBtn.dataset.adminAction}/${encodeURIComponent(adminActionBtn.dataset.id)}/${adminActionBtn.dataset.actionType}`, {}); return; }
+
+  const adminResolveBtn = event.target.closest('[data-admin-resolve]');
+  if (adminResolveBtn) { event.preventDefault(); apiAdmin(`/api/admin/reports/${adminResolveBtn.dataset.adminResolve}/resolve`, {}); return; }
+
+  const adminUserBtn = event.target.closest('[data-admin-user]');
+  if (adminUserBtn) { event.preventDefault(); apiAdmin(`/api/admin/users/${adminUserBtn.dataset.adminUser}`, { is_admin: adminUserBtn.dataset.isAdmin === '1' }); return; }
 
   const close = event.target.closest('[data-close-modal]');
   if (close) { event.preventDefault(); closeModal(); return; }
@@ -2897,6 +2997,21 @@ document.addEventListener('change', (event) => {
 
 document.addEventListener('submit', (event) => {
   const form = event.target;
+
+  if (form.id === 'webReportForm') {
+    event.preventDefault();
+    const data = new FormData(form);
+    const reason = String(data.get('reason') || '');
+    const detail = String(data.get('detail') || '').trim();
+    const error = $('.form-error', form);
+    API.request('/api/reports', { method: 'POST', body: JSON.stringify({ targetType: form.dataset.type, targetId: form.dataset.id, reason: detail ? `${reason}：${detail}` : reason }) }).then(() => {
+      closeModal();
+      toast('举报已提交，管理员会尽快处理');
+    }).catch((requestError) => {
+      if (error) error.textContent = requestError.message;
+    });
+    return;
+  }
 
   if (form.id === 'webAuthForm') {
     event.preventDefault();
