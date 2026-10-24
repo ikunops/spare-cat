@@ -8,7 +8,7 @@ const { DB_PATH, createDatabase, bootstrap } = require('./db');
 const ROOT = path.join(__dirname, '..');
 const PORT = Number(process.env.PORT || 4173);
 const HOST = process.env.HOST || '127.0.0.1';
-const USERNAME_RE = /^[a-zA-Z0-9_-]{3,20}$/;
+const USERNAME_RE = /^[\u4e00-\u9fa5a-zA-Z0-9_\-.·]{2,20}$/;
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8',
@@ -73,27 +73,79 @@ function checkBlocked(pairs) {
   return null;
 }
 
-function adminDashboard() {
+function adminStats() {
   const today = new Date();
   const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   const count = (sql) => db.prepare(sql).get().n;
+  const days = [];
+  for (let i = 13; i >= 0; i -= 1) {
+    const d = new Date(Date.now() - i * 86400000);
+    days.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+  }
+  const catsByDay = new Map(db.prepare("SELECT date(reported_at) AS d, COUNT(*) AS n FROM cats WHERE date(reported_at) >= date('now', '-13 days') GROUP BY d").all().map((r) => [r.d, r.n]));
+  const postsByDay = new Map(db.prepare("SELECT date(created_at) AS d, COUNT(*) AS n FROM posts WHERE date(created_at) >= date('now', '-13 days') GROUP BY d").all().map((r) => [r.d, r.n]));
   return {
     counts: {
       users: count('SELECT COUNT(*) AS n FROM users'),
       cats: count("SELECT COUNT(*) AS n FROM cats WHERE status != 'removed'"),
       pendingVerify: count("SELECT COUNT(*) AS n FROM cats WHERE verification = '待核验' AND status != 'removed'"),
       adopted: count("SELECT COUNT(*) AS n FROM cats WHERE adoption_state = '已领养'"),
+      applications: count('SELECT COUNT(*) AS n FROM applications'),
       posts: count("SELECT COUNT(*) AS n FROM posts WHERE status != 'removed'"),
+      places: count("SELECT COUNT(*) AS n FROM places WHERE status != 'removed'"),
       openReports: count("SELECT COUNT(*) AS n FROM reports WHERE status = 'open'"),
       todayCats: count(`SELECT COUNT(*) AS n FROM cats WHERE date(reported_at) = '${todayStr}'`)
     },
-    reports: db.prepare(`SELECT r.*, c.name AS cat_name FROM reports r LEFT JOIN cats c ON c.id = r.target_id AND r.target_type = 'cat' WHERE r.status = 'open' ORDER BY r.created_at DESC LIMIT 50`).all(),
-    cats: db.prepare(`SELECT id, name, status, verification, adoption_state, reporter_name, reported_at FROM cats ORDER BY reported_at DESC LIMIT 60`).all(),
-    posts: db.prepare(`SELECT id, title, status, author_name, created_at FROM posts ORDER BY created_at DESC LIMIT 60`).all(),
-    places: db.prepare(`SELECT p.id, p.name, p.status, u.display_name AS author_name, p.created_at FROM places p LEFT JOIN users u ON u.id = p.submitted_by ORDER BY p.created_at DESC LIMIT 60`).all(),
-    users: db.prepare(`SELECT id, display_name AS name, username, is_admin, created_at FROM users ORDER BY created_at ASC LIMIT 100`).all()
+    funnel: { reported: count("SELECT COUNT(*) AS n FROM cats"), applied: count('SELECT COUNT(*) AS n FROM applications'), adopted: count("SELECT COUNT(*) AS n FROM cats WHERE adoption_state = '已领养'") },
+    trend: days.map((date) => ({ date, cats: catsByDay.get(date) || 0, posts: postsByDay.get(date) || 0 }))
   };
 }
+
+function adminList(type, page, q, status) {
+  const like = `%${q}%`;
+  const off = (page - 1) * 20;
+  const conds = [];
+  let params = [];
+  let rowsSql;
+  let countSql;
+  if (type === 'cats') {
+    if (q) { conds.push('(name LIKE ? OR reporter_name LIKE ?)'); params.push(like, like); }
+    if (status === 'pending') conds.push("verification = '待核验'");
+    else if (status === 'published' || status === 'removed') conds.push(`status = '${status}'`);
+    const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
+    rowsSql = `SELECT id, name, status, verification AS tag, adoption_state AS extra, reporter_name AS author_name, reported_at AS created_at FROM cats ${where} ORDER BY reported_at DESC LIMIT 20 OFFSET ?`;
+    countSql = `SELECT COUNT(*) AS n FROM cats ${where}`;
+  } else if (type === 'posts') {
+    if (q) { conds.push('(title LIKE ? OR author_name LIKE ?)'); params.push(like, like); }
+    if (status === 'published' || status === 'removed') conds.push(`status = '${status}'`);
+    const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
+    rowsSql = `SELECT id, title AS name, status, '' AS tag, author_name, created_at FROM posts ${where} ORDER BY created_at DESC LIMIT 20 OFFSET ?`;
+    countSql = `SELECT COUNT(*) AS n FROM posts ${where}`;
+  } else if (type === 'places') {
+    if (q) { conds.push('(p.name LIKE ? OR u.display_name LIKE ?)'); params.push(like, like); }
+    if (status === 'published' || status === 'removed') conds.push(`p.status = '${status}'`);
+    const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
+    rowsSql = `SELECT p.id, p.name, p.status, '' AS tag, u.display_name AS author_name, p.created_at FROM places p LEFT JOIN users u ON u.id = p.submitted_by ${where} ORDER BY p.created_at DESC LIMIT 20 OFFSET ?`;
+    countSql = `SELECT COUNT(*) AS n FROM places p LEFT JOIN users u ON u.id = p.submitted_by ${where}`;
+  } else if (type === 'users') {
+    if (q) { conds.push('(display_name LIKE ? OR username LIKE ?)'); params.push(like, like); }
+    const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
+    rowsSql = `SELECT id, display_name AS name, (CASE WHEN is_admin = 1 THEN 'admin' ELSE 'member' END) AS status, username AS tag, area AS extra, created_at FROM users ${where} ORDER BY created_at DESC LIMIT 20 OFFSET ?`;
+    countSql = `SELECT COUNT(*) AS n FROM users ${where}`;
+  } else if (type === 'reports') {
+    if (q) { conds.push('(reason LIKE ? OR reporter_name LIKE ?)'); params.push(like, like); }
+    if (status === 'open' || status === 'resolved') conds.push(`r.status = '${status}'`);
+    const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
+    rowsSql = `SELECT r.id, COALESCE(c.name, r.target_id) AS name, r.status, r.target_type AS tag, r.reporter_name AS author_name, r.reason AS extra, r.created_at FROM reports r LEFT JOIN cats c ON c.id = r.target_id AND r.target_type = 'cat' ${where} ORDER BY r.created_at DESC LIMIT 20 OFFSET ?`;
+    countSql = `SELECT COUNT(*) AS n FROM reports r LEFT JOIN cats c ON c.id = r.target_id AND r.target_type = 'cat' ${where}`;
+  } else {
+    return null;
+  }
+  const total = db.prepare(countSql).get(...params).n;
+  const items = db.prepare(rowsSql).all(...params, off).map((row) => ({ ...row, author_name: row.author_name || '', tag: row.tag || '' }));
+  return { items, total, page, pages: Math.max(1, Math.ceil(total / 20)) };
+}
+
 
 function json(res, status, body) {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
@@ -136,7 +188,7 @@ function api(req, res, url) {
       const username = String(data.username || '').trim();
       const password = String(data.password || '');
       const nickname = String(data.nickname || '').trim() || username;
-      if (!USERNAME_RE.test(username)) return json(res, 400, { error: '用户名需 3-20 位字母、数字、_ 或 -' });
+      if (!USERNAME_RE.test(username)) return json(res, 400, { error: '用户名需 2-20 位中文、字母、数字或 _ - . ·' });
       if (password.length < 6) return json(res, 400, { error: '密码至少 6 位' });
       if (!nickname || nickname.length > 12) return json(res, 400, { error: '昵称需 1-12 个字' });
       if (db.prepare('SELECT 1 FROM users WHERE username = ?').get(username)) {
@@ -359,10 +411,23 @@ function api(req, res, url) {
     }).catch((error) => json(res, 400, { error: error.message }));
   }
 
-  if (req.method === 'GET' && url.pathname === '/api/admin/dashboard') {
+  if (req.method === 'GET' && url.pathname === '/api/admin/stats') {
     const admin = requireAdmin(req, res);
     if (!admin) return;
-    return json(res, 200, adminDashboard());
+    return json(res, 200, adminStats());
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/admin/list') {
+    const admin = requireAdmin(req, res);
+    if (!admin) return;
+    const list = adminList(
+      url.searchParams.get('type') || 'cats',
+      Math.max(1, Number(url.searchParams.get('page') || 1)),
+      (url.searchParams.get('q') || '').trim().slice(0, 50),
+      url.searchParams.get('status') || 'all'
+    );
+    if (!list) return json(res, 400, { error: '未知的列表类型' });
+    return json(res, 200, list);
   }
 
   if (req.method === 'POST' && /^\/api\/admin\/(cats|posts|places)\/[^/]+\/(verify|reject|remove|restore)$/.test(url.pathname)) {
@@ -381,7 +446,7 @@ function api(req, res, url) {
     }[`${kind}:${action}`];
     if (!sql) return json(res, 400, { error: '未知操作' });
     db.prepare(sql).run(id);
-    return json(res, 200, adminDashboard());
+    return json(res, 200, { ok: true });
   }
 
   if (req.method === 'POST' && /^\/api\/admin\/comments\/[^/]+$/.test(url.pathname)) {
@@ -390,14 +455,14 @@ function api(req, res, url) {
     const cid = Number(url.pathname.split('/')[4]);
     if (!Number.isInteger(cid)) return json(res, 400, { error: '无效的评论 ID' });
     db.prepare('DELETE FROM comments WHERE id = ?').run(cid);
-    return json(res, 200, adminDashboard());
+    return json(res, 200, { ok: true });
   }
 
   if (req.method === 'POST' && /^\/api\/admin\/reports\/\d+\/resolve$/.test(url.pathname)) {
     const admin = requireAdmin(req, res);
     if (!admin) return;
     db.prepare("UPDATE reports SET status = 'resolved' WHERE id = ?").run(Number(url.pathname.split('/')[4]));
-    return json(res, 200, adminDashboard());
+    return json(res, 200, { ok: true });
   }
 
   if (req.method === 'POST' && /^\/api\/admin\/users\/[^/]+$/.test(url.pathname)) {
@@ -408,7 +473,7 @@ function api(req, res, url) {
       const isAdmin = Boolean(data.is_admin);
       if (targetId === admin.id && !isAdmin) return json(res, 400, { error: '不能取消自己的管理员权限' });
       db.prepare('UPDATE users SET is_admin = ? WHERE id = ?').run(isAdmin ? 1 : 0, targetId);
-      return json(res, 200, adminDashboard());
+      return json(res, 200, { ok: true });
     }).catch((error) => json(res, 400, { error: error.message }));
   }
 

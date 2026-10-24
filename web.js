@@ -37,8 +37,7 @@ const state = {
   user: null,
   authToken: '',
   geo: null,
-  adminData: null,
-  adminTab: 'reports',
+  admin: { tab: 'dash', contentType: 'cats', page: {}, q: {}, status: {}, stats: null, list: null },
   location: '翠苑 · 西湖区',
   query: '',
   quick: '全部',
@@ -342,7 +341,7 @@ function authModal(mode = 'login') {
       </div>
       <form id="webAuthForm" data-mode="${isRegister ? 'register' : 'login'}">
         ${isRegister ? `<div class="form-field"><label for="webAuthNickname">昵称<small>社区里显示的名字，1-12 个字</small></label><input class="input" id="webAuthNickname" name="nickname" placeholder="比如：三栋的阿橘" maxlength="12" /></div>` : ''}
-        <div class="form-field"><label for="webAuthUsername">用户名<small>3-20 位字母、数字、_ 或 -</small></label><input class="input" id="webAuthUsername" name="username" placeholder="your-name" autocomplete="username" /></div>
+        <div class="form-field"><label for="webAuthUsername">用户名<small>2-20 位中文、字母、数字或 _ - . ·</small></label><input class="input" id="webAuthUsername" name="username" placeholder="your-name 或 中文昵称" autocomplete="username" /></div>
         <div class="form-field"><label for="webAuthPassword">密码<small>${isRegister ? '至少 6 位 · 暂无找回渠道，请牢记' : ''}</small></label><div class="input-wrap"><input class="input" id="webAuthPassword" name="password" type="password" placeholder="${isRegister ? '设置密码' : '你的密码'}" autocomplete="${isRegister ? 'new-password' : 'current-password'}" /><button type="button" class="pw-eye" data-pw-eye="webAuthPassword" aria-label="显示或隐藏密码"><svg class="icon" aria-hidden="true"><use href="#i-eye"></use></svg></button></div></div>
         ${isRegister ? `<div class="form-field"><label for="webAuthPassword2">再输一遍密码</label><div class="input-wrap"><input class="input" id="webAuthPassword2" name="password2" type="password" placeholder="两次输入要一致" autocomplete="new-password" /><button type="button" class="pw-eye" data-pw-eye="webAuthPassword2" aria-label="显示或隐藏密码"><svg class="icon" aria-hidden="true"><use href="#i-eye"></use></svg></button></div></div>
         <div class="info-note">${icon('shield')}注册即表示同意邻里守则：不做交易、位置只到街区、不同体验都会被保留。</div>` : ''}
@@ -1614,71 +1613,146 @@ function renderServiceDetail() {
 
 /* 16-profile.js */
 function apiAdmin(path, body) {
-  return API.request(path, { method: 'POST', body: JSON.stringify(body || {}) }).then((payload) => {
-    state.adminData = payload;
-    renderApp({ preserveScroll: true });
-    return payload;
-  }).catch((error) => {
+  return API.request(path, { method: 'POST', body: JSON.stringify(body || {}) }).then(() => refreshAdmin()).catch((error) => {
     toast(error.message || '操作失败');
     return null;
   });
 }
 
+function adminListType() {
+  const a = state.admin;
+  return a.tab === 'reports' ? 'reports' : a.tab === 'users' ? 'users' : a.tab === 'content' ? a.contentType : null;
+}
+
+function fetchAdminStats() {
+  return API.request('/api/admin/stats').then((payload) => {
+    state.admin.stats = payload;
+  }).catch((error) => toast(error.message || '看板加载失败'));
+}
+
+function fetchAdminList(type) {
+  if (!type) return Promise.resolve();
+  const a = state.admin;
+  const params = new URLSearchParams({ type, page: a.page[type] || 1 });
+  if (a.q[type]) params.set('q', a.q[type]);
+  if (a.status[type] && a.status[type] !== 'all') params.set('status', a.status[type]);
+  return API.request('/api/admin/list?' + params.toString()).then((payload) => {
+    a.list = { type, ...payload };
+    renderApp({ preserveScroll: true });
+  }).catch((error) => toast(error.message || '列表加载失败'));
+}
+
+function refreshAdmin() {
+  fetchAdminStats();
+  fetchAdminList(adminListType());
+}
+
+function adminTrendChart(trend) {
+  const W = 700;
+  const H = 170;
+  const pad = 26;
+  const max = Math.max(1, ...trend.map((d) => Math.max(d.cats, d.posts)));
+  const slot = (W - pad * 2) / trend.length;
+  const bw = Math.max(6, Math.min(12, slot / 3));
+  const bars = trend.map((d, i) => {
+    const x = pad + i * slot;
+    const hc = (d.cats / max) * (H - pad * 2 - 8);
+    const hp = (d.posts / max) * (H - pad * 2 - 8);
+    return '<g>' +
+      '<rect x="' + (x + slot / 2 - bw - 1).toFixed(1) + '" y="' + (H - pad - hc).toFixed(1) + '" width="' + bw + '" height="' + (d.cats ? Math.max(hc, 2).toFixed(1) : 0) + '" fill="#204236" rx="1"></rect>' +
+      '<rect x="' + (x + slot / 2 + 1).toFixed(1) + '" y="' + (H - pad - hp).toFixed(1) + '" width="' + bw + '" height="' + (d.posts ? Math.max(hp, 2).toFixed(1) : 0) + '" fill="#d65b35" rx="1"></rect>' +
+      '<text x="' + (x + slot / 2).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle" font-size="8" fill="var(--muted)">' + d.date.slice(5) + '</text>' +
+      '</g>';
+  }).join('');
+  return '<svg viewBox="0 0 ' + W + ' ' + H + '" class="admin-chart" role="img" aria-label="近 14 天上报与发帖趋势"><line x1="' + pad + '" y1="' + (H - pad) + '" x2="' + (W - pad) + '" y2="' + (H - pad) + '" stroke="var(--line)"></line>' + bars + '</svg>' +
+    '<div class="admin-legend"><span><i class="is-moss"></i>上报猫</span><span><i class="is-orange"></i>发帖</span></div>';
+}
+
+function adminPager(list) {
+  if (!list || list.pages <= 1) return '';
+  return '<div class="admin-pager"><button type="button" ' + (list.page <= 1 ? 'disabled' : '') + ' data-admin-page="' + list.type + ':' + (list.page - 1) + '">上一页</button><span>' + list.page + ' / ' + list.pages + ' 页 · 共 ' + list.total + ' 条</span><button type="button" ' + (list.page >= list.pages ? 'disabled' : '') + ' data-admin-page="' + list.type + ':' + (list.page + 1) + '">下一页</button></div>';
+}
+
 function renderAdmin() {
   if (!state.user || !state.user.isAdmin) {
-    return `<div class="page-head"><div><div class="page-head-kicker">ADMIN · 管理后台</div><h1>需要管理员权限</h1><p>当前账号没有管理权限。如需开通，请联系现有管理员。</p></div></div>`;
+    return '<div class="page-head"><div><div class="page-head-kicker">ADMIN · 管理后台</div><h1>需要管理员权限</h1><p>当前账号没有管理权限。如需开通，请联系现有管理员。</p></div></div>';
   }
-  const d = state.adminData;
-  if (!d) return `<div class="page-head"><div><div class="page-head-kicker">ADMIN · 管理后台</div><h1>运营看板</h1><p>正在加载…</p></div></div>`;
-  if (d.error) return `<div class="page-head"><div><h1>管理后台</h1><p>${esc(d.error)}</p></div></div>`;
-  const c = d.counts;
+  const a = state.admin;
+  if (!a.stats) return '<div class="page-head"><div><div class="page-head-kicker">ADMIN · 管理后台</div><h1>运营看板</h1><p>正在加载…</p></div></div>';
+  if (a.stats.error) return '<div class="page-head"><div><h1>管理后台</h1><p>' + esc(a.stats.error) + '</p></div></div>';
+  const c = a.stats.counts;
+  const f = a.stats.funnel;
   const tabs = [
-    { id: 'reports', label: `举报队列${c.openReports ? ' · ' + c.openReports : ''}` },
-    { id: 'verify', label: `待核验${c.pendingVerify ? ' · ' + c.pendingVerify : ''}` },
+    { id: 'dash', label: '看板' },
+    { id: 'reports', label: '举报' + (c.openReports ? ' · ' + c.openReports : '') },
     { id: 'content', label: '内容管理' },
     { id: 'users', label: '用户' }
   ];
-  if (!tabs.some((t) => t.id === state.adminTab)) state.adminTab = 'reports';
-  return `
-    <div class="admin-page">
-      <div class="page-head"><div><div class="page-head-kicker">ADMIN · 管理后台</div><h1>运营看板</h1><p>核验上报、处理举报、管理内容与用户。所有操作立即生效。</p></div></div>
-      <div class="admin-cards">${[['今日上报', c.todayCats], ['待核验', c.pendingVerify], ['已领养', c.adopted], ['注册用户', c.users], ['帖子', c.posts], ['待处理举报', c.openReports]].map(([label, n]) => `<div class="admin-card"><b>${Number(n)}</b><span>${label}</span></div>`).join('')}</div>
-      <div class="admin-tabs">${tabs.map((t) => `<button type="button" class="${state.adminTab === t.id ? 'is-active' : ''}" data-admin-tab="${t.id}">${t.label}</button>`).join('')}</div>
-      <div class="admin-body">${renderAdminBody(d)}</div>
-    </div>`;
-}
-
-function renderAdminBody(d) {
-  if (state.adminTab === 'reports') {
-    if (!d.reports.length) return `<p class="admin-empty">暂无待处理举报。</p>`;
-    return `<div class="admin-list">${d.reports.map((r) => `
-      <div class="admin-row">
-        <div class="admin-row-main"><b>${esc(r.reporter_name)} 举报了${esc(r.target_type)}${r.cat_name ? `「${esc(r.cat_name)}」` : `（${esc(r.target_id)}）`}</b><p>${esc(r.reason)}</p><small>${esc(r.created_at)}</small></div>
-        <div class="admin-row-actions">${r.target_type === 'cat' ? `<button class="btn btn-small" type="button" data-admin-action="cats" data-id="${esc(r.target_id)}" data-action-type="remove">下架该猫</button>` : ''}<button class="btn btn-small btn-primary" type="button" data-admin-resolve="${r.id}">标记已处理</button></div>
-      </div>`).join('')}</div>`;
-  }
-  if (state.adminTab === 'verify') {
-    const pending = d.cats.filter((cat) => cat.verification === '待核验' && cat.status !== 'removed');
-    if (!pending.length) return `<p class="admin-empty">没有待核验的上报。</p>`;
-    return `<div class="admin-list">${pending.map((cat) => `
-      <div class="admin-row">
-        <div class="admin-row-main"><b>${esc(cat.name)}</b><p>${esc(cat.reporter_name)} · ${esc(cat.reported_at)}</p></div>
-        <div class="admin-row-actions"><button class="btn btn-small btn-primary" type="button" data-admin-action="cats" data-id="${esc(cat.id)}" data-action-type="verify">通过核验</button><button class="btn btn-small" type="button" data-admin-action="cats" data-id="${esc(cat.id)}" data-action-type="reject">退回</button><button class="btn btn-small" type="button" data-admin-action="cats" data-id="${esc(cat.id)}" data-action-type="remove">下架</button></div>
-      </div>`).join('')}</div>`;
-  }
-  if (state.adminTab === 'content') {
-    const section = (title, items, kind) => `<h3 class="admin-section-title">${title}</h3><div class="admin-list">${items.length ? items.map((item) => `
-      <div class="admin-row ${item.status === 'removed' ? 'is-removed' : ''}">
-        <div class="admin-row-main"><b>${esc(item.name || item.title)}</b><p>${esc(item.author_name || '')} · ${esc(item.created_at)}</p></div>
-        <div class="admin-row-actions"><button class="btn btn-small ${item.status === 'removed' ? 'btn-primary' : ''}" type="button" data-admin-action="${kind}" data-id="${esc(item.id)}" data-action-type="${item.status === 'removed' ? 'restore' : 'remove'}">${item.status === 'removed' ? '恢复' : '下架'}</button></div>
-      </div>`).join('') : '<p class="admin-empty">暂无</p>'}</div>`;
-    return section('猫档案', d.cats, 'cats') + section('帖子', d.posts, 'posts') + section('地点', d.places, 'places');
-  }
-  return `<div class="admin-list">${d.users.map((u) => `
-    <div class="admin-row">
-      <div class="admin-row-main"><b>${esc(u.name)}</b><p>@${esc(u.username || u.id)} · 注册于 ${esc(u.created_at)}${u.is_admin ? ' · 管理员' : ''}</p></div>
-      <div class="admin-row-actions">${u.id === state.user.id ? '<span class="admin-self">当前账号</span>' : `<button class="btn btn-small" type="button" data-admin-user="${esc(u.id)}" data-is-admin="${u.is_admin ? 0 : 1}">${u.is_admin ? '取消管理员' : '设为管理员'}</button>`}</div>
-    </div>`).join('')}</div>`;
+  if (!tabs.some((t) => t.id === a.tab)) a.tab = 'dash';
+  const searchBox = (type, placeholder) => '<div class="admin-search"><input class="input" data-admin-search="' + type + '" value="' + esc(a.q[type] || '') + '" placeholder="' + esc(placeholder) + '" /><button class="btn btn-small" type="button" data-admin-go="' + type + '">' + icon('search') + '搜索</button></div>';
+  const chips = (type, options, activeKey) => {
+    const active = a[activeKey][type] !== undefined ? a[activeKey][type] : 'all';
+    return '<div class="admin-chips">' + options.map((o) => '<button type="button" class="chip ' + (active === o[0] ? 'is-active' : '') + '" data-admin-status="' + type + ':' + o[0] + '">' + o[1] + '</button>').join('') + '</div>';
+  };
+  return '<div class="admin-page">' +
+    '<div class="page-head"><div><div class="page-head-kicker">ADMIN · 管理后台</div><h1>运营看板</h1><p>核验上报、处理举报、管理内容与用户。所有操作立即生效。</p></div></div>' +
+    '<div class="admin-cards">' + [['今日上报', c.todayCats], ['待核验', c.pendingVerify], ['已领养', c.adopted], ['领养申请', c.applications], ['注册用户', c.users], ['帖子', c.posts], ['待处理举报', c.openReports]].map((pair) => '<div class="admin-card"><b>' + Number(pair[1]) + '</b><span>' + pair[0] + '</span></div>').join('') + '</div>' +
+    '<div class="admin-tabs">' + tabs.map((t) => '<button type="button" class="' + (a.tab === t.id ? 'is-active' : '') + '" data-admin-tab="' + t.id + '">' + t.label + '</button>').join('') + '</div>' +
+    '<div class="admin-body">' +
+    (a.tab === 'dash' ? (
+      '<div class="admin-panel">' +
+      '<h3 class="admin-section-title">近 14 天趋势</h3>' + adminTrendChart(a.stats.trend) +
+      '<h3 class="admin-section-title">领养转化</h3>' +
+      '<div class="admin-funnel"><div class="funnel-step"><b>' + f.reported + '</b><span>上报猫</span></div><span class="funnel-arrow">' + icon('arrow-right') + '</span><div class="funnel-step"><b>' + f.applied + '</b><span>领养申请</span></div><span class="funnel-arrow">' + icon('arrow-right') + '</span><div class="funnel-step"><b>' + f.adopted + '</b><span>已领养</span></div></div>' +
+      '<h3 class="admin-section-title">在栏内容</h3>' +
+      '<div class="admin-cards">' + [['地点', c.places], ['帖子', c.posts], ['在栏猫', c.cats]].map((pair) => '<div class="admin-card"><b>' + Number(pair[1]) + '</b><span>' + pair[0] + '</span></div>').join('') + '</div>' +
+      '</div>'
+    ) : '') +
+    (a.tab === 'reports' ? (
+      '<div class="admin-panel">' +
+      chips('reports', [['open', '待处理'], ['resolved', '已处理'], ['all', '全部']], 'status') +
+      '<div class="admin-list">' +
+      ((a.list && a.list.type === 'reports' ? a.list.items : []).length ? (a.list.items).map((r) => (
+        '<div class="admin-row ' + (r.status === 'resolved' ? 'is-removed' : '') + '">' +
+        '<div class="admin-row-main"><b>' + esc(r.author_name) + ' 举报了' + esc(r.tag) + (r.tag === 'cat' && r.name ? '「' + esc(r.name) + '」' : '') + '</b><p>' + esc(r.extra || '') + '</p><small>' + esc(r.created_at) + '</small></div>' +
+        '<div class="admin-row-actions">' + (r.status === 'open' ? '<button class="btn btn-small btn-primary" type="button" data-admin-resolve="' + r.id + '">标记已处理</button>' : '<span class="admin-self">已处理</span>') + '</div>' +
+        '</div>'
+      )).join('') : '<p class="admin-empty">加载中…</p>') +
+      '</div>' + adminPager(a.list && a.list.type === 'reports' ? a.list : null) +
+      '</div>'
+    ) : '') +
+    (a.tab === 'content' ? (
+      '<div class="admin-panel">' +
+      '<div class="admin-chips">' + [['cats', '猫档案'], ['posts', '帖子'], ['places', '地点']].map((t) => '<button type="button" class="chip ' + (a.contentType === t[0] ? 'is-active' : '') + '" data-admin-type="' + t[0] + '">' + t[1] + '</button>').join('') + '</div>' +
+      searchBox(a.contentType, a.contentType === 'cats' ? '搜猫名/上报人' : (a.contentType === 'posts' ? '搜标题/作者' : '搜地点/推荐人')) +
+      (a.contentType === 'cats'
+        ? chips('cats', [['all', '全部'], ['published', '在栏'], ['pending', '待核验'], ['removed', '已下架']], 'status')
+        : chips(a.contentType, [['all', '全部'], ['published', '在栏'], ['removed', '已下架']], 'status')) +
+      '<div class="admin-list">' +
+      ((a.list && a.list.type === a.contentType ? a.list.items : []).length ? (a.list.items).map((item) => (
+        '<div class="admin-row ' + (item.status === 'removed' ? 'is-removed' : '') + '">' +
+        '<div class="admin-row-main"><b>' + esc(item.name || '(未命名)') + '</b><p>' + esc(item.author_name || '匿名') + ' · ' + esc(item.created_at || '') + (item.tag ? ' · ' + esc(item.tag) : '') + (item.extra ? ' · ' + esc(item.extra) : '') + '</p></div>' +
+        '<div class="admin-row-actions">' + (a.contentType === 'cats' && item.tag === '待核验' ? '<button class="btn btn-small btn-primary" type="button" data-admin-action="cats" data-id="' + esc(item.id) + '" data-action-type="verify">通过核验</button><button class="btn btn-small" type="button" data-admin-action="cats" data-id="' + esc(item.id) + '" data-action-type="reject">退回</button>' : '') +
+        '<button class="btn btn-small ' + (item.status === 'removed' ? 'btn-primary' : '') + '" type="button" data-admin-action="' + a.contentType + '" data-id="' + esc(item.id) + '" data-action-type="' + (item.status === 'removed' ? 'restore' : 'remove') + '">' + (item.status === 'removed' ? '恢复' : '下架') + '</button>' +
+        '</div></div>'
+      )).join('') : '<p class="admin-empty">加载中…</p>') +
+      '</div>' + adminPager(a.list && a.list.type === a.contentType ? a.list : null) +
+      '</div>'
+    ) : '') +
+    (a.tab === 'users' ? (
+      '<div class="admin-panel">' +
+      searchBox('users', '搜昵称/用户名') +
+      '<div class="admin-list">' +
+      ((a.list && a.list.type === 'users' ? a.list.items : []).length ? (a.list.items).map((u) => (
+        '<div class="admin-row ' + (u.status === 'admin' ? 'is-admin-row' : '') + '">' +
+        '<div class="admin-row-main"><b>' + esc(u.name) + (u.status === 'admin' ? ' · 管理员' : '') + '</b><p>@' + esc(u.tag || u.id) + ' · 注册于 ' + esc(u.created_at) + '</p></div>' +
+        '<div class="admin-row-actions">' + (u.id === state.user.id ? '<span class="admin-self">当前账号</span>' : '<button class="btn btn-small" type="button" data-admin-user="' + esc(u.id) + '" data-is-admin="' + (u.status === 'admin' ? 0 : 1) + '">' + (u.status === 'admin' ? '取消管理员' : '设为管理员') + '</button>') + '</div>' +
+        '</div>'
+      )).join('') : '<p class="admin-empty">加载中…</p>') +
+      '</div>' + adminPager(a.list && a.list.type === 'users' ? a.list : null) +
+      '</div>'
+    ) : '') +
+    '</div>';
 }
 
 function reportModal(targetType, targetId) {
@@ -2308,14 +2382,10 @@ function renderApp(options = {}) {
   } else if (spotPickerMap && state.page !== 'service') {
     closeSpotPicker();
   }
-  if (state.page === 'admin' && state.user && state.user.isAdmin && !state.adminData) {
-    API.request('/api/admin/dashboard').then((payload) => {
-      state.adminData = payload;
-      renderApp({ preserveScroll: true });
-    }).catch((error) => {
-      state.adminData = { error: error.message || '加载失败' };
-      renderApp({ preserveScroll: true });
-    });
+  if (state.page === 'admin' && state.user && state.user.isAdmin) {
+    if (!state.admin.stats) fetchAdminStats();
+    const listType = adminListType();
+    if (listType && (!state.admin.list || state.admin.list.type !== listType)) fetchAdminList(listType);
   }
   window.scrollTo({ top: preserveScroll ? scrollY : 0, left: 0, behavior: 'auto' });
 }
@@ -2705,7 +2775,8 @@ document.addEventListener('click', (event) => {
     state.applications = [];
     state.adoptions = [];
     state.likedPosts = [];
-    state.adminData = null;
+    state.admin.stats = null;
+    state.admin.list = null;
     closeModal();
     toast('已退出登录');
     renderApp();
@@ -2730,7 +2801,40 @@ document.addEventListener('click', (event) => {
   }
 
   const adminTabBtn = event.target.closest('[data-admin-tab]');
-  if (adminTabBtn) { event.preventDefault(); state.adminTab = adminTabBtn.dataset.adminTab; renderApp({ preserveScroll: true }); return; }
+  if (adminTabBtn) { event.preventDefault(); state.admin.tab = adminTabBtn.dataset.adminTab; renderApp({ preserveScroll: true }); return; }
+
+  const adminTypeBtn = event.target.closest('[data-admin-type]');
+  if (adminTypeBtn) { event.preventDefault(); state.admin.contentType = adminTypeBtn.dataset.adminType; fetchAdminList(state.admin.contentType); return; }
+
+  const adminStatusBtn = event.target.closest('[data-admin-status]');
+  if (adminStatusBtn) {
+    event.preventDefault();
+    const parts = adminStatusBtn.dataset.adminStatus.split(':');
+    state.admin.status[parts[0]] = parts[1];
+    state.admin.page[parts[0]] = 1;
+    fetchAdminList(parts[0]);
+    return;
+  }
+
+  const adminGoBtn = event.target.closest('[data-admin-go]');
+  if (adminGoBtn) {
+    event.preventDefault();
+    const type = adminGoBtn.dataset.adminGo;
+    const input = document.querySelector('[data-admin-search="' + type + '"]');
+    state.admin.q[type] = (input && input.value || '').trim();
+    state.admin.page[type] = 1;
+    fetchAdminList(type);
+    return;
+  }
+
+  const adminPageBtn = event.target.closest('[data-admin-page]');
+  if (adminPageBtn) {
+    event.preventDefault();
+    const parts = adminPageBtn.dataset.adminPage.split(':');
+    state.admin.page[parts[0]] = Number(parts[1]);
+    fetchAdminList(parts[0]);
+    return;
+  }
 
   const adminActionBtn = event.target.closest('[data-admin-action]');
   if (adminActionBtn) { event.preventDefault(); apiAdmin(`/api/admin/${adminActionBtn.dataset.adminAction}/${encodeURIComponent(adminActionBtn.dataset.id)}/${adminActionBtn.dataset.actionType}`, {}); return; }
@@ -3371,6 +3475,15 @@ document.addEventListener('submit', (event) => {
 });
 
 document.addEventListener('keydown', (event) => {
+  const adminSearch = event.target.closest && event.target.closest('[data-admin-search]');
+  if (adminSearch && event.key === 'Enter') {
+    event.preventDefault();
+    const type = adminSearch.dataset.adminSearch;
+    state.admin.q[type] = (adminSearch.value || '').trim();
+    state.admin.page[type] = 1;
+    fetchAdminList(type);
+    return;
+  }
   if (event.key === 'Escape') { closeFullMap(); closeModal(); return; }
   if (event.key !== 'Enter' && event.key !== ' ') return;
   const target = event.target.closest('[data-open-cat], [data-open-post], [data-open-service]');

@@ -669,3 +669,24 @@ body.full-map-open .web-tabbar { display: none !important; }
 .pw-eye { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); border: 0; background: transparent; color: var(--muted); cursor: pointer; padding: 7px; display: grid; place-items: center; border-radius: 50%; }
 .pw-eye:hover { color: var(--ink); background: rgba(23,37,29,.06); }
 .pw-eye .icon { width: 16px; height: 16px; }
+
+/* ---- admin dash / search / pager ---- */
+.admin-chart { width: 100%; border: 1px solid var(--line); border-radius: 12px; background: var(--paper-light); }
+.admin-legend { display: flex; gap: 16px; margin: 8px 0 0; font-size: 10px; color: var(--ink-soft); }
+.admin-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.admin-legend .is-moss { background: #204236; }
+.admin-legend .is-orange { background: #d65b35; }
+.admin-funnel { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 12px; background: var(--paper-light); padding: 16px 20px; }
+.funnel-step { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.funnel-step b { font-family: var(--serif); font-size: 24px; }
+.funnel-step span { font-size: 10px; color: var(--muted); }
+.funnel-arrow { color: var(--muted); }
+.admin-panel { margin-bottom: 24px; }
+.admin-search { display: flex; gap: 8px; margin-bottom: 10px; }
+.admin-search .input { flex: 1; min-height: 38px; }
+.admin-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.admin-chips .chip { border: 1px solid var(--line); background: var(--paper-light); border-radius: 999px; padding: 4px 12px; font-size: 10px; color: var(--ink-soft); cursor: pointer; min-height: 26px; }
+.admin-chips .chip.is-active { background: var(--moss); color: var(--paper-light); border-color: var(--moss); }
+.admin-pager { display: flex; align-items: center; gap: 12px; margin-top: 12px; font-size: 11px; color: var(--ink-soft); }
+.admin-pager button { border: 1px solid var(--line); background: var(--paper-light); border-radius: 8px; padding: 6px 14px; font-size: 11px; cursor: pointer; min-height: 30px; }
+.admin-pager button:disabled { opacity: .4; cursor: default; }
