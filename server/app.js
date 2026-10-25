@@ -11,6 +11,8 @@ const HOST = process.env.HOST || '127.0.0.1';
 const USERNAME_RE = /^[\u4e00-\u9fa5a-zA-Z0-9_\-.·]{2,20}$/;
 // 测试模式：无令牌访问自动发访客身份（免注册），管理权限仍需真实注册账号
 const TEST_MODE = process.env.TEST_MODE === '1';
+// 站长直通：bootstrap 带 ?owner=KEY 且匹配时，直接以管理员身份（站长）进入
+const OWNER_KEY = process.env.OWNER_KEY || '';
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8',
@@ -191,6 +193,15 @@ function makeGuest(db) {
 
 function api(req, res, url) {
   if (req.method === 'GET' && url.pathname === '/api/bootstrap') {
+    if (TEST_MODE && OWNER_KEY && url.searchParams.get('owner') === OWNER_KEY) {
+      const token = makeToken();
+      const existing = db.prepare("SELECT 1 FROM users WHERE id = 'owner'").get();
+      if (existing) db.prepare('UPDATE users SET token = ? WHERE id = ?').run(token, 'owner');
+      else db.prepare(`INSERT INTO users (id, display_name, avatar_text, area, verified, credit, token, is_admin)
+        VALUES ('owner', '站长', '站', '测试环境', 1, 95, ?, 1)`).run(token);
+      const owner = db.prepare('SELECT * FROM users WHERE id = ?').get('owner');
+      return json(res, 200, { token, ...bootstrap(db, owner) });
+    }
     const user = authUser(req);
     if (user) return json(res, 200, bootstrap(db, user));
     if (TEST_MODE) {

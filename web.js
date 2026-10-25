@@ -179,7 +179,7 @@ function toast(text) {
 
 function applyBootstrap(payload) {
   if (!payload) return;
-  if (payload.token && !state.authToken) saveAuth(payload.token);
+  if (payload.token) saveAuth(payload.token);
   state.user = payload.user || null;
   if (Array.isArray(payload.cats)) {
     const baseIds = new Set(CATS.map((cat) => cat.id));
@@ -3506,8 +3506,13 @@ window.addEventListener('popstate', () => {
 
 load();
 if (state.geo) applyGeoDistances();
+// 站长直通链接：?owner=KEY 用一次即从地址栏清除，避免分享外泄
+const OWNER_LINK_KEY = new URLSearchParams(location.search).get('owner');
+if (OWNER_LINK_KEY) {
+  try { history.replaceState(null, '', location.pathname + location.hash); } catch (error) { /* file:// 等 */ }
+}
 if (API.enabled) {
-  API.request('/api/bootstrap').then((payload) => {
+  API.request('/api/bootstrap' + (OWNER_LINK_KEY ? '?owner=' + encodeURIComponent(OWNER_LINK_KEY) : '')).then((payload) => {
     applyBootstrap(payload);
     renderApp({ preserveScroll: true });
   }).catch((error) => console.warn('[xianmao] using localStorage fallback', error));
